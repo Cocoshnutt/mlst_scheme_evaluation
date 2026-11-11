@@ -17,13 +17,18 @@ def _(mo):
     # Schema Evaluation
 
     ## Measurment metrics
-
     - Loci: Total number of loci that were evaluated.
     - Alleles: Total number of alleles.
-    - Valid Alleles: Total number of valid alleles. An allele is considered valid if its sequence size is a multiple of 3, if it has a single start and stop codon, if has no in-frame stop codons, and if it contains no ambiguous bases.
 
     ## List of evaluation criteria:
+    - Valid Alleles: Total number of valid alleles. An allele is considered valid if its sequence size is a multiple of 3, if it has a single start and stop codon, if has no in-frame stop codons, and if it contains no ambiguous bases.
     """)
+    return
+
+
+@app.cell
+def unzip():
+    print("Hello world")
     return
 
 
