@@ -2,3 +2,5 @@
 __marimo__/
 .venv/
 layout/
+.cache/
+__pycache__/
