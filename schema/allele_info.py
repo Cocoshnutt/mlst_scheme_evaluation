@@ -2,9 +2,11 @@
 
 This library analyzes every FASTA locus in an extracted MLST scheme and
 returns the integrity and diversity fields used by the chewBBACA Schema
-Evaluator allele-analysis table. Static sequence metrics and allele lengths
-are cached inside the extracted scheme. Changing the minimum allele length
-therefore recalculates only the per-locus short-allele counts and does not
+Evaluator allele-analysis table. It also detects empty allele records and
+exact duplicate nucleotide sequences within each locus. Static sequence
+metrics and allele lengths are cached inside the extracted scheme. Changing
+the minimum allele length therefore recalculates only the per-locus
+short-allele counts and does not affect the sequence-integrity metrics or
 reread FASTA sequences.
 
 The public :func:`get_scheme_allele_information` function is intended for the
@@ -21,7 +23,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from schema_info import (
+from .info import (
     BACTERIAL_START_CODONS,
     FASTA_FILENAME_SUFFIXES,
     STOP_CODONS,
@@ -29,7 +31,7 @@ from schema_info import (
 )
 
 SCHEME_ALLELE_INFORMATION_CACHE_FILENAME = ".scheme-allele-information-cache.json"
-SCHEME_ALLELE_INFORMATION_CACHE_VERSION = 1
+SCHEME_ALLELE_INFORMATION_CACHE_VERSION = 2
 
 CODON_TO_AMINO_ACID = {
     "AAA": "K",
@@ -103,7 +105,9 @@ __all__ = [
     "SCHEME_ALLELE_INFORMATION_CACHE_FILENAME",
     "SCHEME_ALLELE_INFORMATION_CACHE_VERSION",
     "LocusAlleleInformation",
+    "SchemeSequenceIntegrityInformation",
     "get_scheme_allele_information",
+    "get_scheme_sequence_integrity_information",
 ]
 
 
@@ -119,6 +123,11 @@ class LocusAlleleInformation:
         validated_allele_proportion: Valid alleles divided by total alleles.
         distinct_protein_allele_count: Unique proteins translated from valid
             allele sequences.
+        empty_sequence_count: FASTA records with no nucleotides after
+            whitespace normalization.
+        within_locus_duplicate_sequence_count: Non-empty allele records whose
+            normalized nucleotide sequence duplicates an earlier record in
+            this locus. Comparisons do not span loci.
         incomplete_orf_allele_count: Alleles whose size is not divisible by
             three.
         ambiguous_bases_allele_count: Alleles containing non-ACGT bases.
@@ -146,6 +155,8 @@ class LocusAlleleInformation:
     invalid_allele_count: int
     validated_allele_proportion: float
     distinct_protein_allele_count: int
+    empty_sequence_count: int
+    within_locus_duplicate_sequence_count: int
     incomplete_orf_allele_count: int
     ambiguous_bases_allele_count: int
     missing_start_or_stop_codon_allele_count: int
@@ -155,6 +166,42 @@ class LocusAlleleInformation:
     alleles_below_mode_threshold_count: int
     alleles_above_mode_threshold_count: int
     missing_allele_identifier_count: int | None
+
+
+@dataclass(frozen=True)
+class SchemeSequenceIntegrityInformation:
+    """Scheme-level empty and within-locus duplicate sequence metrics.
+
+    Attributes:
+        locus_count: Total number of recognized locus FASTA files.
+        empty_sequence_count: Total FASTA records with no normalized
+            nucleotides.
+        loci_with_empty_sequences_count: Loci containing at least one empty
+            FASTA record or containing no FASTA records at all.
+        loci_with_empty_sequences_percentage: Percentage of all loci affected
+            by empty sequence data.
+        loci_with_empty_sequences: Names of loci affected by empty sequence
+            data, in schema path order.
+        within_locus_duplicate_sequence_count: Total redundant, non-empty
+            allele records beyond the first occurrence of each normalized
+            sequence, compared only within each locus.
+        loci_with_within_locus_duplicate_sequences_count: Loci containing at
+            least one within-locus duplicate nucleotide sequence.
+        loci_with_within_locus_duplicate_sequences_percentage: Percentage of
+            all loci containing within-locus duplicates.
+        loci_with_within_locus_duplicate_sequences: Names of loci containing
+            within-locus duplicate sequences, in schema path order.
+    """
+
+    locus_count: int
+    empty_sequence_count: int
+    loci_with_empty_sequences_count: int
+    loci_with_empty_sequences_percentage: float
+    loci_with_empty_sequences: tuple[str, ...]
+    within_locus_duplicate_sequence_count: int
+    loci_with_within_locus_duplicate_sequences_count: int
+    loci_with_within_locus_duplicate_sequences_percentage: float
+    loci_with_within_locus_duplicate_sequences: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -187,6 +234,8 @@ class _CachedLocusAlleleInformation:
     total_allele_count: int
     valid_allele_count: int
     distinct_protein_allele_count: int
+    empty_sequence_count: int
+    within_locus_duplicate_sequence_count: int
     incomplete_orf_allele_count: int
     ambiguous_bases_allele_count: int
     missing_start_or_stop_codon_allele_count: int
@@ -413,10 +462,21 @@ def _analyze_locus(
     missing_start_or_stop_codon_allele_count = 0
     in_frame_stop_codon_allele_count = 0
     distinct_protein_alleles: set[str] = set()
+    empty_sequence_count = 0
+    unique_nonempty_nucleotide_sequences: set[str] = set()
+    within_locus_duplicate_sequence_count = 0
 
     for _fasta_identifier, allele_sequence in fasta_records:
         normalized_allele_sequence = "".join(allele_sequence.split()).upper()
         allele_lengths.append(len(normalized_allele_sequence))
+        if not normalized_allele_sequence:
+            empty_sequence_count += 1
+        elif normalized_allele_sequence in unique_nonempty_nucleotide_sequences:
+            within_locus_duplicate_sequence_count += 1
+        else:
+            unique_nonempty_nucleotide_sequences.add(
+                normalized_allele_sequence
+            )
         allele_sequence_validation = _evaluate_allele_sequence(
             normalized_allele_sequence
         )
@@ -447,6 +507,10 @@ def _analyze_locus(
         total_allele_count=len(fasta_records),
         valid_allele_count=valid_allele_count,
         distinct_protein_allele_count=len(distinct_protein_alleles),
+        empty_sequence_count=empty_sequence_count,
+        within_locus_duplicate_sequence_count=(
+            within_locus_duplicate_sequence_count
+        ),
         incomplete_orf_allele_count=incomplete_orf_allele_count,
         ambiguous_bases_allele_count=ambiguous_bases_allele_count,
         missing_start_or_stop_codon_allele_count=(
@@ -518,6 +582,10 @@ def _read_cached_analysis(
                 valid_allele_count=int(locus_data["valid_allele_count"]),
                 distinct_protein_allele_count=int(
                     locus_data["distinct_protein_allele_count"]
+                ),
+                empty_sequence_count=int(locus_data["empty_sequence_count"]),
+                within_locus_duplicate_sequence_count=int(
+                    locus_data["within_locus_duplicate_sequence_count"]
                 ),
                 incomplete_orf_allele_count=int(
                     locus_data["incomplete_orf_allele_count"]
@@ -664,6 +732,10 @@ def get_scheme_allele_information(
             distinct_protein_allele_count=(
                 cached_locus_information.distinct_protein_allele_count
             ),
+            empty_sequence_count=cached_locus_information.empty_sequence_count,
+            within_locus_duplicate_sequence_count=(
+                cached_locus_information.within_locus_duplicate_sequence_count
+            ),
             incomplete_orf_allele_count=(
                 cached_locus_information.incomplete_orf_allele_count
             ),
@@ -692,6 +764,88 @@ def get_scheme_allele_information(
             ),
         )
         for cached_locus_information in cached_analysis
+    )
+
+
+def get_scheme_sequence_integrity_information(
+    schema_directory_path: str | Path,
+) -> SchemeSequenceIntegrityInformation:
+    """Return empty and within-locus duplicate sequence metrics for a scheme.
+
+    Empty sequence counts include FASTA records with no nucleotides after
+    whitespace normalization. A locus with no FASTA records is included in the
+    affected-locus count but does not contribute an empty sequence record.
+    Duplicate counts include only redundant non-empty records beyond the first
+    occurrence of a normalized sequence within the same locus. Comparisons do
+    not span loci and do not depend on the minimum allele-length setting.
+
+    Args:
+        schema_directory_path: Directory containing an extracted MLST scheme.
+
+    Returns:
+        Scheme-level counts, percentages, and affected locus names.
+
+    Raises:
+        FileNotFoundError: If ``schema_directory_path`` does not exist.
+        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        OSError: If a FASTA file cannot be read or decompressed.
+        UnicodeError: If a FASTA file is not valid UTF-8 text.
+    """
+    resolved_schema_directory_path = _resolve_schema_directory_path(
+        schema_directory_path
+    )
+    cached_analysis = _get_or_create_cached_analysis(
+        resolved_schema_directory_path
+    )
+    loci_with_empty_sequences = tuple(
+        locus_information.locus_name
+        for locus_information in cached_analysis
+        if locus_information.empty_sequence_count > 0
+        or locus_information.total_allele_count == 0
+    )
+    loci_with_within_locus_duplicate_sequences = tuple(
+        locus_information.locus_name
+        for locus_information in cached_analysis
+        if locus_information.within_locus_duplicate_sequence_count > 0
+    )
+    locus_count = len(cached_analysis)
+    if locus_count:
+        loci_with_empty_sequences_percentage = (
+            len(loci_with_empty_sequences) / locus_count * 100
+        )
+        loci_with_within_locus_duplicate_sequences_percentage = (
+            len(loci_with_within_locus_duplicate_sequences)
+            / locus_count
+            * 100
+        )
+    else:
+        loci_with_empty_sequences_percentage = 0.0
+        loci_with_within_locus_duplicate_sequences_percentage = 0.0
+
+    return SchemeSequenceIntegrityInformation(
+        locus_count=locus_count,
+        empty_sequence_count=sum(
+            locus_information.empty_sequence_count
+            for locus_information in cached_analysis
+        ),
+        loci_with_empty_sequences_count=len(loci_with_empty_sequences),
+        loci_with_empty_sequences_percentage=(
+            loci_with_empty_sequences_percentage
+        ),
+        loci_with_empty_sequences=loci_with_empty_sequences,
+        within_locus_duplicate_sequence_count=sum(
+            locus_information.within_locus_duplicate_sequence_count
+            for locus_information in cached_analysis
+        ),
+        loci_with_within_locus_duplicate_sequences_count=len(
+            loci_with_within_locus_duplicate_sequences
+        ),
+        loci_with_within_locus_duplicate_sequences_percentage=(
+            loci_with_within_locus_duplicate_sequences_percentage
+        ),
+        loci_with_within_locus_duplicate_sequences=(
+            loci_with_within_locus_duplicate_sequences
+        ),
     )
 
 

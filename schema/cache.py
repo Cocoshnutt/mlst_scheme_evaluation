@@ -1,6 +1,6 @@
 """Extract and cache MLST scheme archives for repeated use.
 
-This module avoids extracting an unchanged scheme archive more than once. Each
+It avoids extracting an unchanged scheme archive more than once. Each
 archive is extracted into a cache directory identified by its source path, file
 size, and modification time. Extraction first happens in a temporary directory
 so an interrupted operation cannot be mistaken for a complete cache entry.

@@ -1,7 +1,7 @@
 """Inspect an extracted MLST scheme and report basic sequence statistics.
 
 This module counts loci and evaluates allele coding sequences in a directory
-produced by ``schema_cache.cache_archive``. A locus is represented by one FASTA
+produced by ``schema.cache.cache_archive``. A locus is represented by one FASTA
 file, and an allele is represented by one FASTA record within those files. The
 evaluation reports valid alleles, individual invalidity categories, and alleles
 shorter than a configurable minimum sequence length. It also reports

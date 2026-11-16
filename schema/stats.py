@@ -21,7 +21,7 @@ from pathlib import Path
 
 import altair as alt
 
-from schema_info import FASTA_FILENAME_SUFFIXES
+from .info import FASTA_FILENAME_SUFFIXES
 
 SCHEMA_STATISTICS_CACHE_FILENAME = ".schema-statistics-cache.json"
 SCHEMA_STATISTICS_CACHE_VERSION = 1

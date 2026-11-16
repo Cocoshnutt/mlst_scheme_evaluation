@@ -17,3 +17,7 @@ dependencies = [
   "vegafusion>=2.0.0",
   "vl-convert-python>=1.0.0",
 ]
+
+[tool.mlst_scheme_evaluation.conda]
+channels = ["conda-forge", "bioconda", "nodefaults"]
+dependencies = ["conda-forge::mafft", "bioconda::blast"]
