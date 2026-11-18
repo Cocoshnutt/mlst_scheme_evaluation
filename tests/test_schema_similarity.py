@@ -11,12 +11,16 @@ from schema.similarity import (
     SCHEMA_SIMILARITY_CACHE_FILENAME,
     SEQUENCE_LEVEL_AMINO_ACID,
     SEQUENCE_LEVEL_NUCLEOTIDE,
+    CandidateParalogThresholds,
+    CrossLocusSimilarityMatch,
+    SchemaSimilarityAnalysis,
     _BlastHsp,
     _collect_selected_allele_sequences,
     _create_similarity_matches,
     _find_all_fasta_file_paths,
     _SelectedAlleleSequence,
     _SimilarityLevelResult,
+    classify_candidate_paralogous_locus_pairs,
     get_schema_similarity_analysis,
 )
 
@@ -313,6 +317,260 @@ class SimilarityMetricTest(unittest.TestCase):
         )
 
         self.assertIsNone(matches[0].nucleotide_subject_strand)
+
+
+class CandidateParalogClassificationTest(unittest.TestCase):
+    """Test advisory classification without repeating BLAST searches."""
+
+    @staticmethod
+    def _match(
+        *,
+        query_locus_name: str,
+        subject_locus_name: str,
+        sequence_level: str,
+        identity_percentage: float,
+        alignment_length: int,
+        blast_score_ratio: float = 0.1,
+    ) -> CrossLocusSimilarityMatch:
+        """Create one directed similarity row with irrelevant fields fixed."""
+        return CrossLocusSimilarityMatch(
+            sequence_level=sequence_level,
+            query_locus_name=query_locus_name,
+            subject_locus_name=subject_locus_name,
+            query_allele_identifier=f"{query_locus_name}_1",
+            subject_allele_identifier=f"{subject_locus_name}_1",
+            identity_percentage=identity_percentage,
+            alignment_length=alignment_length,
+            query_coverage_percentage=80.0,
+            subject_coverage_percentage=75.0,
+            minimum_coverage_percentage=75.0,
+            raw_score=50.0,
+            blast_score_ratio=blast_score_ratio,
+            nucleotide_subject_strand=(
+                "plus" if sequence_level == SEQUENCE_LEVEL_NUCLEOTIDE else None
+            ),
+        )
+
+    @staticmethod
+    def _analysis(
+        *matches: CrossLocusSimilarityMatch,
+    ) -> SchemaSimilarityAnalysis:
+        """Wrap synthetic matches in the public analysis result type."""
+        return SchemaSimilarityAnalysis(
+            locus_count=4,
+            nucleotide_selected_locus_count=4,
+            amino_acid_selected_locus_count=4,
+            nucleotide_possible_directed_pair_count=12,
+            amino_acid_possible_directed_pair_count=12,
+            matches=matches,
+            blastn_version="blastn: test",
+            blastp_version="blastp: test",
+            method_identifier="test",
+            blast_evalue=0.001,
+            reused_from_cache=True,
+        )
+
+    def test_empty_analysis_has_no_candidate_or_evidence_pairs(self) -> None:
+        """Return zero counts when BLAST reported no cross-locus matches."""
+        result = classify_candidate_paralogous_locus_pairs(self._analysis())
+
+        self.assertEqual(result.evaluated_locus_pair_count, 0)
+        self.assertEqual(result.blast_score_ratio_evidence_pair_count, 0)
+        self.assertEqual(result.candidate_pairs, ())
+
+    def test_strict_amino_acid_identity_boundary_is_respected(self) -> None:
+        """Require protein identity to be greater than, rather than equal to, 70%."""
+        analysis = self._analysis(
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=70.0,
+                alignment_length=80,
+            ),
+            self._match(
+                query_locus_name="gene_c",
+                subject_locus_name="gene_d",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=70.001,
+                alignment_length=80,
+            ),
+        )
+
+        result = classify_candidate_paralogous_locus_pairs(analysis)
+
+        self.assertEqual(result.candidate_pair_count, 1)
+        self.assertEqual(
+            (
+                result.candidate_pairs[0].first_locus_name,
+                result.candidate_pairs[0].second_locus_name,
+            ),
+            ("gene_c", "gene_d"),
+        )
+
+    def test_nucleotide_identity_is_inclusive_but_length_is_strict(self) -> None:
+        """Accept 90% identity only when the HSP is longer than 100 bp."""
+        analysis = self._analysis(
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_NUCLEOTIDE,
+                identity_percentage=90.0,
+                alignment_length=100,
+            ),
+            self._match(
+                query_locus_name="gene_c",
+                subject_locus_name="gene_d",
+                sequence_level=SEQUENCE_LEVEL_NUCLEOTIDE,
+                identity_percentage=90.0,
+                alignment_length=101,
+            ),
+        )
+
+        result = classify_candidate_paralogous_locus_pairs(analysis)
+
+        self.assertEqual(result.candidate_pair_count, 1)
+        self.assertTrue(
+            result.candidate_pairs[0].meets_nucleotide_repeated_homology_criterion
+        )
+
+    def test_reciprocal_and_sequence_level_hits_collapse_to_one_pair(self) -> None:
+        """Retain strongest directed evidence but count one unordered pair."""
+        analysis = self._analysis(
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=71.0,
+                alignment_length=50,
+                blast_score_ratio=0.7,
+            ),
+            self._match(
+                query_locus_name="gene_b",
+                subject_locus_name="gene_a",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=75.0,
+                alignment_length=45,
+                blast_score_ratio=0.8,
+            ),
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_NUCLEOTIDE,
+                identity_percentage=92.0,
+                alignment_length=110,
+                blast_score_ratio=0.65,
+            ),
+            self._match(
+                query_locus_name="gene_b",
+                subject_locus_name="gene_a",
+                sequence_level=SEQUENCE_LEVEL_NUCLEOTIDE,
+                identity_percentage=95.0,
+                alignment_length=105,
+                blast_score_ratio=0.6,
+            ),
+        )
+
+        result = classify_candidate_paralogous_locus_pairs(analysis)
+        candidate_pair = result.candidate_pairs[0]
+
+        self.assertEqual(result.evaluated_locus_pair_count, 1)
+        self.assertEqual(result.candidate_pair_count, 1)
+        self.assertEqual(result.candidate_locus_count, 2)
+        self.assertEqual(result.both_criteria_candidate_pair_count, 1)
+        self.assertEqual(result.blast_score_ratio_evidence_pair_count, 1)
+        self.assertEqual(
+            candidate_pair.amino_acid_evidence_match.query_locus_name,
+            "gene_b",
+        )
+        self.assertEqual(
+            candidate_pair.nucleotide_evidence_match.query_locus_name,
+            "gene_b",
+        )
+        self.assertEqual(
+            candidate_pair.maximum_blast_score_ratio_match.sequence_level,
+            SEQUENCE_LEVEL_AMINO_ACID,
+        )
+
+    def test_bsr_only_evidence_does_not_create_a_candidate(self) -> None:
+        """Count the BSR reference while keeping it non-classifying."""
+        analysis = self._analysis(
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=40.0,
+                alignment_length=80,
+                blast_score_ratio=0.6,
+            )
+        )
+
+        result = classify_candidate_paralogous_locus_pairs(analysis)
+
+        self.assertEqual(result.blast_score_ratio_evidence_pair_count, 1)
+        self.assertEqual(result.candidate_pair_count, 0)
+
+    def test_nonqualifying_sequence_level_match_remains_visible(self) -> None:
+        """Distinguish a below-threshold hit from an absent BLAST hit."""
+        analysis = self._analysis(
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=75.0,
+                alignment_length=80,
+            ),
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_NUCLEOTIDE,
+                identity_percentage=70.61,
+                alignment_length=2_215,
+            ),
+        )
+
+        result = classify_candidate_paralogous_locus_pairs(analysis)
+        candidate_pair = result.candidate_pairs[0]
+
+        self.assertTrue(candidate_pair.meets_amino_acid_identity_criterion)
+        self.assertFalse(
+            candidate_pair.meets_nucleotide_repeated_homology_criterion
+        )
+        self.assertEqual(
+            candidate_pair.nucleotide_evidence_match.identity_percentage,
+            70.61,
+        )
+        self.assertEqual(
+            candidate_pair.nucleotide_evidence_match.alignment_length,
+            2_215,
+        )
+
+    def test_configurable_thresholds_reclassify_existing_measurements(self) -> None:
+        """Apply new thresholds to the same immutable BLAST measurements."""
+        analysis = self._analysis(
+            self._match(
+                query_locus_name="gene_a",
+                subject_locus_name="gene_b",
+                sequence_level=SEQUENCE_LEVEL_AMINO_ACID,
+                identity_percentage=75.0,
+                alignment_length=80,
+            )
+        )
+
+        default_result = classify_candidate_paralogous_locus_pairs(analysis)
+        stricter_result = classify_candidate_paralogous_locus_pairs(
+            analysis,
+            thresholds=CandidateParalogThresholds(
+                amino_acid_identity_threshold_percentage=80.0
+            ),
+        )
+
+        self.assertEqual(default_result.candidate_pair_count, 1)
+        self.assertEqual(stricter_result.candidate_pair_count, 0)
+        self.assertEqual(
+            stricter_result.thresholds.amino_acid_identity_threshold_percentage,
+            80.0,
+        )
 
 
 class SimilarityCacheTest(unittest.TestCase):

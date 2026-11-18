@@ -31,6 +31,15 @@ as zero similarity. The default E-value floor of 0.001 follows the search
 setting used by Schema Refinery. It is a search sensitivity setting, not a
 literature-derived pass/fail or candidate-paralogy threshold.
 
+Candidate paralogous locus pairs are derived separately from these cached
+measurements. Reciprocal directed hits are collapsed into one unordered pair.
+The default advisory criteria are amino-acid identity strictly above 70%, or
+nucleotide identity of at least 90% across an alignment strictly longer than
+100 bp. A directional BSR of at least 0.6 is retained as supplementary
+same-gene evidence and does not create a candidate classification by itself.
+These study-specific values are configurable screening references, not proof
+of copy number or evolutionary paralogy.
+
 Results are cached atomically inside the extracted schema using the FASTA
 source signature, BLAST versions, allele-selection method, and search
 settings. Temporary FASTA files, BLAST databases, and raw output are removed
@@ -49,6 +58,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
+from math import isfinite
 from pathlib import Path
 from typing import TextIO
 
@@ -60,20 +70,32 @@ SCHEMA_SIMILARITY_CACHE_FILENAME = ".schema-similarity-cache.json"
 SCHEMA_SIMILARITY_CACHE_VERSION = 2
 SIMILARITY_METHOD_IDENTIFIER = "blast-modal-length-selected-alleles-bsr-v2"
 DEFAULT_BLAST_EVALUE = 0.001
+DEFAULT_CANDIDATE_PARALOG_AMINO_ACID_IDENTITY_THRESHOLD_PERCENTAGE = 70.0
+DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_IDENTITY_THRESHOLD_PERCENTAGE = 90.0
+DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_ALIGNMENT_LENGTH_THRESHOLD = 100
+DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD = 0.6
 SEQUENCE_LEVEL_NUCLEOTIDE = "nucleotide"
 SEQUENCE_LEVEL_AMINO_ACID = "amino_acid"
 SIMILARITY_PROGRESS_STAGE_COUNT = 5
 
 __all__ = [
     "DEFAULT_BLAST_EVALUE",
+    "DEFAULT_CANDIDATE_PARALOG_AMINO_ACID_IDENTITY_THRESHOLD_PERCENTAGE",
+    "DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_ALIGNMENT_LENGTH_THRESHOLD",
+    "DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_IDENTITY_THRESHOLD_PERCENTAGE",
+    "DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD",
     "SCHEMA_SIMILARITY_CACHE_FILENAME",
     "SCHEMA_SIMILARITY_CACHE_VERSION",
     "SEQUENCE_LEVEL_AMINO_ACID",
     "SEQUENCE_LEVEL_NUCLEOTIDE",
     "SIMILARITY_METHOD_IDENTIFIER",
+    "CandidateParalogAnalysis",
+    "CandidateParalogThresholds",
+    "CandidateParalogousLocusPair",
     "CrossLocusSimilarityMatch",
     "SchemaSimilarityAnalysis",
     "SimilarityProgress",
+    "classify_candidate_paralogous_locus_pairs",
     "get_schema_similarity_analysis",
 ]
 
@@ -149,6 +171,307 @@ class SchemaSimilarityAnalysis:
             match.sequence_level == SEQUENCE_LEVEL_AMINO_ACID
             for match in self.matches
         )
+
+
+@dataclass(frozen=True)
+class CandidateParalogThresholds:
+    """Configurable literature-derived screening values.
+
+    Amino-acid identity and nucleotide alignment length use strict ``>``
+    comparisons. Nucleotide identity and directional BSR use inclusive
+    ``>=`` comparisons. The BSR threshold supplies supplementary evidence
+    only and never creates a candidate classification by itself.
+    """
+
+    amino_acid_identity_threshold_percentage: float = (
+        DEFAULT_CANDIDATE_PARALOG_AMINO_ACID_IDENTITY_THRESHOLD_PERCENTAGE
+    )
+    nucleotide_identity_threshold_percentage: float = (
+        DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_IDENTITY_THRESHOLD_PERCENTAGE
+    )
+    nucleotide_alignment_length_threshold: int = (
+        DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_ALIGNMENT_LENGTH_THRESHOLD
+    )
+    blast_score_ratio_threshold: float = (
+        DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD
+    )
+
+    def __post_init__(self) -> None:
+        """Reject values outside the meaningful measurement domains."""
+        for field_name, percentage in (
+            (
+                "amino_acid_identity_threshold_percentage",
+                self.amino_acid_identity_threshold_percentage,
+            ),
+            (
+                "nucleotide_identity_threshold_percentage",
+                self.nucleotide_identity_threshold_percentage,
+            ),
+        ):
+            if not isfinite(percentage) or not 0 <= percentage <= 100:
+                raise ValueError(f"{field_name} must be between 0 and 100")
+        if self.nucleotide_alignment_length_threshold < 0:
+            raise ValueError(
+                "nucleotide_alignment_length_threshold must be at least 0"
+            )
+        if (
+            not isfinite(self.blast_score_ratio_threshold)
+            or self.blast_score_ratio_threshold < 0
+        ):
+            raise ValueError("blast_score_ratio_threshold must be at least 0")
+
+
+@dataclass(frozen=True)
+class CandidateParalogousLocusPair:
+    """One unordered locus pair flagged by nucleotide or protein evidence.
+
+    The sequence-level matches remain directed because coverage and BSR depend
+    on the query. A match can be present even when its sequence-level criterion
+    is not met, allowing consumers to distinguish a non-qualifying measurement
+    from the absence of a BLAST-reported hit. When a criterion is met, its
+    stored match is the strongest qualifying match. ``first_locus_name`` and
+    ``second_locus_name`` are sorted only to provide one stable row for the
+    unordered pair.
+    """
+
+    first_locus_name: str
+    second_locus_name: str
+    meets_amino_acid_identity_criterion: bool
+    meets_nucleotide_repeated_homology_criterion: bool
+    meets_blast_score_ratio_reference: bool
+    amino_acid_evidence_match: CrossLocusSimilarityMatch | None
+    nucleotide_evidence_match: CrossLocusSimilarityMatch | None
+    maximum_blast_score_ratio_match: CrossLocusSimilarityMatch
+
+    @property
+    def evidence_label(self) -> str:
+        """Return a compact description of the classifying evidence."""
+        if (
+            self.meets_amino_acid_identity_criterion
+            and self.meets_nucleotide_repeated_homology_criterion
+        ):
+            return "Nucleotide and amino acid"
+        if self.meets_amino_acid_identity_criterion:
+            return "Amino acid"
+        return "Nucleotide"
+
+
+@dataclass(frozen=True)
+class CandidateParalogAnalysis:
+    """Scheme-wide candidate-pair results derived from cached BLAST hits."""
+
+    thresholds: CandidateParalogThresholds
+    evaluated_locus_pair_count: int
+    blast_score_ratio_evidence_pair_count: int
+    candidate_pairs: tuple[CandidateParalogousLocusPair, ...]
+
+    @property
+    def candidate_pair_count(self) -> int:
+        """Return the number of unique candidate locus pairs."""
+        return len(self.candidate_pairs)
+
+    @property
+    def candidate_locus_count(self) -> int:
+        """Return the number of unique loci involved in candidate pairs."""
+        return len(
+            {
+                locus_name
+                for candidate_pair in self.candidate_pairs
+                for locus_name in (
+                    candidate_pair.first_locus_name,
+                    candidate_pair.second_locus_name,
+                )
+            }
+        )
+
+    @property
+    def amino_acid_candidate_pair_count(self) -> int:
+        """Return pairs meeting the amino-acid identity criterion."""
+        return sum(
+            candidate_pair.meets_amino_acid_identity_criterion
+            for candidate_pair in self.candidate_pairs
+        )
+
+    @property
+    def nucleotide_candidate_pair_count(self) -> int:
+        """Return pairs meeting the nucleotide repeated-homology criterion."""
+        return sum(
+            candidate_pair.meets_nucleotide_repeated_homology_criterion
+            for candidate_pair in self.candidate_pairs
+        )
+
+    @property
+    def both_criteria_candidate_pair_count(self) -> int:
+        """Return pairs meeting both candidate criteria."""
+        return sum(
+            candidate_pair.meets_amino_acid_identity_criterion
+            and candidate_pair.meets_nucleotide_repeated_homology_criterion
+            for candidate_pair in self.candidate_pairs
+        )
+
+
+def _candidate_evidence_sort_key(
+    similarity_match: CrossLocusSimilarityMatch,
+) -> tuple[float | int | str, ...]:
+    """Return a deterministic strongest-evidence-first ordering key."""
+    return (
+        -similarity_match.identity_percentage,
+        -similarity_match.alignment_length,
+        -similarity_match.minimum_coverage_percentage,
+        -similarity_match.raw_score,
+        similarity_match.query_locus_name,
+        similarity_match.subject_locus_name,
+        similarity_match.query_allele_identifier,
+        similarity_match.subject_allele_identifier,
+    )
+
+
+def _blast_score_ratio_sort_key(
+    similarity_match: CrossLocusSimilarityMatch,
+) -> tuple[float | int | str, ...]:
+    """Return a deterministic highest-directional-BSR-first ordering key."""
+    return (
+        -similarity_match.blast_score_ratio,
+        *_candidate_evidence_sort_key(similarity_match),
+    )
+
+
+def classify_candidate_paralogous_locus_pairs(
+    schema_similarity_analysis: SchemaSimilarityAnalysis,
+    *,
+    thresholds: CandidateParalogThresholds | None = None,
+) -> CandidateParalogAnalysis:
+    """Classify unique locus pairs using configurable advisory thresholds.
+
+    Reciprocal directed BLAST matches are grouped into one lexicographically
+    ordered locus pair. A pair is reported as a candidate when at least one
+    amino-acid match has identity strictly above the configured amino-acid
+    threshold, or when at least one nucleotide match has identity at least
+    the configured nucleotide threshold across an alignment strictly longer
+    than the configured length threshold. No coverage requirement is applied.
+
+    The BSR threshold is evaluated across both sequence levels and directions,
+    but is supplementary only: a BSR-only pair contributes to the BSR evidence
+    count without appearing in ``candidate_pairs``. The input measurements are
+    not modified or recalculated, making repeated threshold changes cheap.
+
+    Args:
+        schema_similarity_analysis: Cached or newly calculated directed BLAST
+            measurements for the selected scheme.
+        thresholds: Study-derived screening values to apply. The documented
+            defaults are used when omitted.
+
+    Returns:
+        Scheme-wide counts and one result for each unordered candidate pair.
+    """
+    if thresholds is None:
+        thresholds = CandidateParalogThresholds()
+
+    matches_by_locus_pair: dict[
+        tuple[str, str], list[CrossLocusSimilarityMatch]
+    ] = {}
+    for similarity_match in schema_similarity_analysis.matches:
+        if similarity_match.sequence_level not in {
+            SEQUENCE_LEVEL_NUCLEOTIDE,
+            SEQUENCE_LEVEL_AMINO_ACID,
+        }:
+            continue
+        if similarity_match.query_locus_name == similarity_match.subject_locus_name:
+            continue
+        locus_pair = tuple(
+            sorted(
+                (
+                    similarity_match.query_locus_name,
+                    similarity_match.subject_locus_name,
+                )
+            )
+        )
+        matches_by_locus_pair.setdefault(locus_pair, []).append(similarity_match)
+
+    candidate_pairs: list[CandidateParalogousLocusPair] = []
+    blast_score_ratio_evidence_pair_count = 0
+    for locus_pair in sorted(matches_by_locus_pair):
+        pair_matches = matches_by_locus_pair[locus_pair]
+        amino_acid_matches = [
+            similarity_match
+            for similarity_match in pair_matches
+            if similarity_match.sequence_level == SEQUENCE_LEVEL_AMINO_ACID
+        ]
+        nucleotide_matches = [
+            similarity_match
+            for similarity_match in pair_matches
+            if similarity_match.sequence_level == SEQUENCE_LEVEL_NUCLEOTIDE
+        ]
+        qualifying_amino_acid_matches = [
+            similarity_match
+            for similarity_match in amino_acid_matches
+            if similarity_match.identity_percentage
+            > thresholds.amino_acid_identity_threshold_percentage
+        ]
+        qualifying_nucleotide_matches = [
+            similarity_match
+            for similarity_match in nucleotide_matches
+            if similarity_match.identity_percentage
+            >= thresholds.nucleotide_identity_threshold_percentage
+            and similarity_match.alignment_length
+            > thresholds.nucleotide_alignment_length_threshold
+        ]
+        maximum_blast_score_ratio_match = min(
+            pair_matches,
+            key=_blast_score_ratio_sort_key,
+        )
+        meets_blast_score_ratio_reference = (
+            maximum_blast_score_ratio_match.blast_score_ratio
+            >= thresholds.blast_score_ratio_threshold
+        )
+        if meets_blast_score_ratio_reference:
+            blast_score_ratio_evidence_pair_count += 1
+
+        if not qualifying_amino_acid_matches and not qualifying_nucleotide_matches:
+            continue
+        amino_acid_evidence_match = (
+            min(
+                qualifying_amino_acid_matches or amino_acid_matches,
+                key=_candidate_evidence_sort_key,
+            )
+            if amino_acid_matches
+            else None
+        )
+        nucleotide_evidence_match = (
+            min(
+                qualifying_nucleotide_matches or nucleotide_matches,
+                key=_candidate_evidence_sort_key,
+            )
+            if nucleotide_matches
+            else None
+        )
+        candidate_pairs.append(
+            CandidateParalogousLocusPair(
+                first_locus_name=locus_pair[0],
+                second_locus_name=locus_pair[1],
+                meets_amino_acid_identity_criterion=(
+                    bool(qualifying_amino_acid_matches)
+                ),
+                meets_nucleotide_repeated_homology_criterion=(
+                    bool(qualifying_nucleotide_matches)
+                ),
+                meets_blast_score_ratio_reference=(
+                    meets_blast_score_ratio_reference
+                ),
+                amino_acid_evidence_match=amino_acid_evidence_match,
+                nucleotide_evidence_match=nucleotide_evidence_match,
+                maximum_blast_score_ratio_match=maximum_blast_score_ratio_match,
+            )
+        )
+
+    return CandidateParalogAnalysis(
+        thresholds=thresholds,
+        evaluated_locus_pair_count=len(matches_by_locus_pair),
+        blast_score_ratio_evidence_pair_count=(
+            blast_score_ratio_evidence_pair_count
+        ),
+        candidate_pairs=tuple(candidate_pairs),
+    )
 
 
 @dataclass(frozen=True)

@@ -6,8 +6,10 @@ file, and an allele is represented by one FASTA record within those files. The
 evaluation reports valid alleles, individual invalidity categories, and alleles
 shorter than a configurable minimum sequence length. It also reports
 scheme-wide counts and percentages of alleles below 80% or above 120% of their
-respective locus's modal length. Common FASTA filename extensions are
-recognized in both uncompressed and gzip-compressed form.
+respective locus's modal length, together with pooled scheme-wide GC content.
+GC content uses only canonical A/C/G/T bases as its denominator; ambiguous and
+other noncanonical characters are counted separately. Common FASTA filename
+extensions are recognized in both uncompressed and gzip-compressed form.
 
 Notebook code can call :func:`count_loci`, :func:`count_alleles`, or
 :func:`get_schema_information`. The module can also be executed as a
@@ -37,7 +39,7 @@ VALID_DNA_BASES = frozenset("ACGT")
 BACTERIAL_START_CODONS = frozenset({"ATG", "GTG", "TTG"})
 STOP_CODONS = frozenset({"TAA", "TAG", "TGA"})
 SCHEMA_INFORMATION_CACHE_FILENAME = ".schema-information-cache.json"
-SCHEMA_INFORMATION_CACHE_VERSION = 3
+SCHEMA_INFORMATION_CACHE_VERSION = 4
 
 __all__ = [
     "BACTERIAL_START_CODONS",
@@ -46,15 +48,83 @@ __all__ = [
     "SCHEMA_INFORMATION_CACHE_VERSION",
     "STOP_CODONS",
     "VALID_DNA_BASES",
+    "NucleotideBaseComposition",
     "SchemaInformation",
     "count_alleles",
     "count_alleles_below_minimum_length",
     "count_invalid_alleles",
     "count_loci",
+    "count_nucleotide_base_composition",
     "count_valid_alleles",
     "get_schema_information",
     "is_valid_allele_sequence",
 ]
+
+
+@dataclass(frozen=True)
+class NucleotideBaseComposition:
+    """Canonical and excluded nucleotide-base counts for one or more sequences.
+
+    Attributes:
+        guanine_cytosine_base_count: Number of canonical ``G`` and ``C`` bases.
+        canonical_nucleotide_base_count: Number of ``A``, ``C``, ``G``, and
+            ``T`` bases used as the GC-content denominator.
+        excluded_nucleotide_base_count: Number of non-whitespace characters
+            excluded from the denominator because they are not canonical DNA
+            bases.
+    """
+
+    guanine_cytosine_base_count: int
+    canonical_nucleotide_base_count: int
+    excluded_nucleotide_base_count: int
+
+    @property
+    def guanine_cytosine_content_percentage(self) -> float | None:
+        """Return GC percentage, or ``None`` when no canonical bases exist."""
+        if self.canonical_nucleotide_base_count == 0:
+            return None
+        return (
+            self.guanine_cytosine_base_count
+            / self.canonical_nucleotide_base_count
+            * 100
+        )
+
+
+def count_nucleotide_base_composition(
+    nucleotide_sequence: str,
+) -> NucleotideBaseComposition:
+    """Count bases used by the shared scheme and per-locus GC calculation.
+
+    Whitespace and letter case are ignored. GC content is intentionally based
+    on canonical bases only: ``G`` and ``C`` form the numerator, while
+    ``A``, ``C``, ``G``, and ``T`` form the denominator. Every other
+    non-whitespace character is counted as excluded rather than being assigned
+    fractional nucleotide content.
+
+    Args:
+        nucleotide_sequence: Nucleotide text to summarize.
+
+    Returns:
+        Immutable canonical, GC, and excluded base counts.
+    """
+    normalized_nucleotide_sequence = "".join(nucleotide_sequence.split()).upper()
+    adenine_base_count = normalized_nucleotide_sequence.count("A")
+    cytosine_base_count = normalized_nucleotide_sequence.count("C")
+    guanine_base_count = normalized_nucleotide_sequence.count("G")
+    thymine_base_count = normalized_nucleotide_sequence.count("T")
+    canonical_nucleotide_base_count = (
+        adenine_base_count
+        + cytosine_base_count
+        + guanine_base_count
+        + thymine_base_count
+    )
+    return NucleotideBaseComposition(
+        guanine_cytosine_base_count=(cytosine_base_count + guanine_base_count),
+        canonical_nucleotide_base_count=canonical_nucleotide_base_count,
+        excluded_nucleotide_base_count=(
+            len(normalized_nucleotide_sequence) - canonical_nucleotide_base_count
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -89,6 +159,13 @@ class SchemaInformation:
             a percentage of all alleles in the scheme.
         alleles_above_locus_mode_threshold_percentage: Above-threshold count as
             a percentage of all alleles in the scheme.
+        guanine_cytosine_content_percentage: Pooled scheme-wide GC percentage
+            using canonical bases only, or ``None`` when the scheme contains no
+            canonical bases.
+        canonical_nucleotide_base_count: Total A/C/G/T bases used as the
+            scheme-wide GC-content denominator.
+        excluded_nucleotide_base_count: Total noncanonical, non-whitespace
+            characters excluded from the GC-content denominator.
     """
 
     locus_count: int
@@ -105,6 +182,9 @@ class SchemaInformation:
     alleles_above_locus_mode_threshold_count: int
     alleles_below_locus_mode_threshold_percentage: float
     alleles_above_locus_mode_threshold_percentage: float
+    guanine_cytosine_content_percentage: float | None
+    canonical_nucleotide_base_count: int
+    excluded_nucleotide_base_count: int
 
 
 @dataclass(frozen=True)
@@ -142,6 +222,9 @@ class _AlleleCounts:
     in_frame_stop_codon_allele_count: int
     alleles_below_minimum_length_count: int
     allele_lengths: tuple[int, ...]
+    guanine_cytosine_base_count: int
+    canonical_nucleotide_base_count: int
+    excluded_nucleotide_base_count: int
 
     @property
     def invalid_allele_count(self) -> int:
@@ -319,11 +402,26 @@ def _count_alleles_in_lines(
     in_frame_stop_codon_allele_count = 0
     alleles_below_minimum_length_count = 0
     allele_lengths: list[int] = []
+    guanine_cytosine_base_count = 0
+    canonical_nucleotide_base_count = 0
+    excluded_nucleotide_base_count = 0
 
     for allele_sequence in _iterate_fasta_sequences(fasta_lines):
         normalized_allele_sequence = "".join(allele_sequence.split())
         allele_lengths.append(len(normalized_allele_sequence))
         allele_count += 1
+        nucleotide_base_composition = count_nucleotide_base_composition(
+            normalized_allele_sequence
+        )
+        guanine_cytosine_base_count += (
+            nucleotide_base_composition.guanine_cytosine_base_count
+        )
+        canonical_nucleotide_base_count += (
+            nucleotide_base_composition.canonical_nucleotide_base_count
+        )
+        excluded_nucleotide_base_count += (
+            nucleotide_base_composition.excluded_nucleotide_base_count
+        )
         allele_validation_result = _evaluate_allele_sequence(
             allele_sequence,
             minimum_sequence_length,
@@ -352,6 +450,9 @@ def _count_alleles_in_lines(
         in_frame_stop_codon_allele_count=in_frame_stop_codon_allele_count,
         alleles_below_minimum_length_count=alleles_below_minimum_length_count,
         allele_lengths=tuple(allele_lengths),
+        guanine_cytosine_base_count=guanine_cytosine_base_count,
+        canonical_nucleotide_base_count=canonical_nucleotide_base_count,
+        excluded_nucleotide_base_count=excluded_nucleotide_base_count,
     )
 
 
@@ -407,6 +508,9 @@ def _count_alleles_in_files(
     allele_lengths: list[int] = []
     alleles_below_locus_mode_threshold_count = 0
     alleles_above_locus_mode_threshold_count = 0
+    guanine_cytosine_base_count = 0
+    canonical_nucleotide_base_count = 0
+    excluded_nucleotide_base_count = 0
 
     for allele_file_path in allele_file_paths:
         allele_file_counts = _count_alleles_in_file(
@@ -431,6 +535,15 @@ def _count_alleles_in_files(
             allele_file_counts.alleles_below_minimum_length_count
         )
         allele_lengths.extend(allele_file_counts.allele_lengths)
+        guanine_cytosine_base_count += (
+            allele_file_counts.guanine_cytosine_base_count
+        )
+        canonical_nucleotide_base_count += (
+            allele_file_counts.canonical_nucleotide_base_count
+        )
+        excluded_nucleotide_base_count += (
+            allele_file_counts.excluded_nucleotide_base_count
+        )
         (
             locus_alleles_below_threshold_count,
             locus_alleles_above_threshold_count,
@@ -453,6 +566,9 @@ def _count_alleles_in_files(
         in_frame_stop_codon_allele_count=in_frame_stop_codon_allele_count,
         alleles_below_minimum_length_count=alleles_below_minimum_length_count,
         allele_lengths=tuple(allele_lengths),
+        guanine_cytosine_base_count=guanine_cytosine_base_count,
+        canonical_nucleotide_base_count=canonical_nucleotide_base_count,
+        excluded_nucleotide_base_count=excluded_nucleotide_base_count,
     )
     return (
         allele_counts,
@@ -550,6 +666,15 @@ def _read_cached_schema_analysis(
             ),
             alleles_below_minimum_length_count=0,
             allele_lengths=allele_lengths,
+            guanine_cytosine_base_count=int(
+                cached_analysis_data["guanine_cytosine_base_count"]
+            ),
+            canonical_nucleotide_base_count=int(
+                cached_analysis_data["canonical_nucleotide_base_count"]
+            ),
+            excluded_nucleotide_base_count=int(
+                cached_analysis_data["excluded_nucleotide_base_count"]
+            ),
         )
         locus_count = int(cached_analysis_data["locus_count"])
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -565,6 +690,17 @@ def _read_cached_schema_analysis(
         alleles_below_locus_mode_threshold_count
         + alleles_above_locus_mode_threshold_count
         > allele_counts.allele_count
+    ):
+        return None
+    if min(
+        allele_counts.guanine_cytosine_base_count,
+        allele_counts.canonical_nucleotide_base_count,
+        allele_counts.excluded_nucleotide_base_count,
+    ) < 0:
+        return None
+    if (
+        allele_counts.guanine_cytosine_base_count
+        > allele_counts.canonical_nucleotide_base_count
     ):
         return None
 
@@ -604,6 +740,15 @@ def _write_cached_schema_analysis(
             allele_counts.in_frame_stop_codon_allele_count
         ),
         "allele_lengths": allele_counts.allele_lengths,
+        "guanine_cytosine_base_count": (
+            allele_counts.guanine_cytosine_base_count
+        ),
+        "canonical_nucleotide_base_count": (
+            allele_counts.canonical_nucleotide_base_count
+        ),
+        "excluded_nucleotide_base_count": (
+            allele_counts.excluded_nucleotide_base_count
+        ),
         "alleles_below_locus_mode_threshold_count": (
             cached_schema_analysis.alleles_below_locus_mode_threshold_count
         ),
@@ -867,6 +1012,17 @@ def get_schema_information(
             / allele_counts.allele_count
             * 100
         )
+    scheme_nucleotide_base_composition = NucleotideBaseComposition(
+        guanine_cytosine_base_count=(
+            allele_counts.guanine_cytosine_base_count
+        ),
+        canonical_nucleotide_base_count=(
+            allele_counts.canonical_nucleotide_base_count
+        ),
+        excluded_nucleotide_base_count=(
+            allele_counts.excluded_nucleotide_base_count
+        ),
+    )
 
     return SchemaInformation(
         locus_count=cached_schema_analysis.locus_count,
@@ -896,6 +1052,15 @@ def get_schema_information(
         ),
         alleles_above_locus_mode_threshold_percentage=(
             alleles_above_locus_mode_threshold_percentage
+        ),
+        guanine_cytosine_content_percentage=(
+            scheme_nucleotide_base_composition.guanine_cytosine_content_percentage
+        ),
+        canonical_nucleotide_base_count=(
+            scheme_nucleotide_base_composition.canonical_nucleotide_base_count
+        ),
+        excluded_nucleotide_base_count=(
+            scheme_nucleotide_base_composition.excluded_nucleotide_base_count
         ),
     )
 
@@ -964,6 +1129,20 @@ def main() -> None:
     print(
         "In-frame stop codon: "
         f"{schema_information.in_frame_stop_codon_allele_count}"
+    )
+    guanine_cytosine_content_label = (
+        "unavailable"
+        if schema_information.guanine_cytosine_content_percentage is None
+        else f"{schema_information.guanine_cytosine_content_percentage:.2f}%"
+    )
+    print(f"GC content: {guanine_cytosine_content_label}")
+    print(
+        "Canonical bases in GC denominator: "
+        f"{schema_information.canonical_nucleotide_base_count}"
+    )
+    print(
+        "Noncanonical bases excluded from GC denominator: "
+        f"{schema_information.excluded_nucleotide_base_count}"
     )
     print(
         f"Alleles <{schema_information.minimum_sequence_length} bp: "

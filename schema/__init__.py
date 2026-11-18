@@ -8,6 +8,7 @@ invoked with ``python -m schema.<module>``.
 __all__ = [
     "alignment",
     "allele_info",
+    "bsr",
     "cache",
     "info",
     "similarity",

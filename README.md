@@ -25,14 +25,15 @@ validation of newly developed schemes.
 - Archive extraction and versioned caching for the included MLST and cgMLST
   scheme collection.
 - Scheme-wide and per-locus allele counts, length distributions, modal-length
-  outliers, coding-sequence integrity checks, and empty or duplicate sequence
-  detection.
+  outliers and coding-sequence integrity checks.
 - Interactive summary statistics, charts, and a searchable per-locus table in
   the Marimo application.
 - Cached nucleotide and protein MAFFT analyses for alignment-gap statistics and
   nucleotide polymorphic-site measurements.
 - Cached inter-locus BLAST analyses reporting nucleotide and protein identity,
   coverage, and BLAST Score Ratio measurements.
+- Cached representative-to-allele protein BSR coverage and inter-locus
+  high-BSR similarity groups.
 
 Genome-based functional evaluation, cross-organism validation, standardized
 screening flags, and the final reporting deliverables remain planned work; see
@@ -214,6 +215,7 @@ package entry points:
 ```console
 uv run --locked python -m schema.cache --help
 uv run --locked python -m schema.alignment --help
+uv run --locked python -m schema.bsr --help
 uv run --locked python -m schema.similarity --help
 ```
 
@@ -236,36 +238,24 @@ study-specific screening thresholds into a universal scheme pass/fail result.
 - [x] Check ambiguous bases, coding-sequence length, start and stop codons, and
   in-frame stop codons.
 - [x] Report minimum, maximum, median, modal, and outlier allele lengths.
-- [x] Detect empty and duplicate nucleotide sequences, with the number and
-  percentage of affected loci.
 - [x] Align alleles within each locus and report nucleotide and amino-acid gap
   proportions.
 - [x] Calculate the number and percentage of polymorphic nucleotide sites per
   locus.
 - [x] Measure inter-locus nucleotide and amino-acid similarity, including
   identity, coverage, and BLAST Score Ratio (BSR).
-- [ ] Report highly similar inter-locus pairs as **candidate paralogous loci**.
+- [x] Report highly similar inter-locus pairs as **candidate paralogous loci**.
   Sequence similarity alone must not be presented as proof of copy number or
   evolutionary paralogy.
 
 #### Schema Refinery statistics integration
 
-- [ ] Add mean allele length, all tied modes, frequent length peaks, and clear
+- [x] Add mean allele length, all tied modes, frequent length peaks, and clear
   single-mode/multimodal/outlier locus categories.
-- [ ] Add per-locus and scheme-wide GC content.
-- [ ] Detect exact nucleotide sequences shared between loci using cached
-  sequence hashes.
-- [ ] Report distinct nucleotide alleles and distinct translated proteins.
-- [ ] Check missing, duplicate, and malformed allele identifiers.
-- [ ] If future scheme inputs include curated representatives in `short/`,
-  validate them without counting them as ordinary loci. The current scheme
-  collection does not contain `short/` directories.
-- [ ] Add representative-versus-allele BSR coverage and inter-locus high-BSR
+- [x] Add per-locus and scheme-wide GC content.
+- [x] Report distinct nucleotide alleles and distinct translated proteins.
+- [x] Add representative-versus-allele BSR coverage and inter-locus high-BSR
   groups.
-- [ ] Support comparison against a second schema (Schema Refinery
-  `MatchSchemas`-style analysis).
-- [ ] Support optional annotation imports while keeping FASTA-only analysis
-  usable without annotations.
 - [x] Cache threshold-independent intermediates for implemented analyses by
   archive fingerprint and analysis version so changing display thresholds does
   not rescan FASTA files. Future analyses must preserve this behavior.
