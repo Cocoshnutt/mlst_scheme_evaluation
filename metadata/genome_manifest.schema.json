@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Functional evaluation representative genome set",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "title",
+    "description",
+    "scheme_id",
+    "created_date",
+    "dataset_version",
+    "provenance_status",
+    "genomes"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "scheme_id": {"type": "string", "minLength": 1},
+    "created_date": {"type": "string", "minLength": 1},
+    "dataset_version": {"type": "string", "minLength": 1},
+    "provenance_status": {"type": "string", "minLength": 1},
+    "genomes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "genome_id",
+          "scientific_name",
+          "assembly_accession",
+          "source_url",
+          "retrieved_date",
+          "local_path",
+          "sha256",
+          "inclusion_rationale"
+        ],
+        "properties": {
+          "genome_id": {"type": "string", "minLength": 1},
+          "scientific_name": {"type": "string", "minLength": 1},
+          "taxonomy_identifier": {"type": "string"},
+          "assembly_accession": {"type": "string", "minLength": 1},
+          "source_url": {"type": "string", "minLength": 1},
+          "retrieved_date": {"type": "string", "minLength": 1},
+          "local_path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+          "assembly_level": {"type": "string"},
+          "contig_count": {"type": "integer", "minimum": 0},
+          "total_length_bp": {"type": "integer", "minimum": 0},
+          "n50_bp": {"type": "integer", "minimum": 0},
+          "completeness_percentage": {"type": "number", "minimum": 0, "maximum": 100},
+          "contamination_percentage": {"type": "number", "minimum": 0, "maximum": 100},
+          "lineage": {"type": "string"},
+          "inclusion_rationale": {"type": "string", "minLength": 1},
+          "source_license": {"type": "string"},
+          "source_citation": {"type": "string"},
+          "notes": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,14 +1,15 @@
 """Calculate and cache chewBBACA-style allele information per locus.
 
 This library analyzes every FASTA locus in an extracted MLST scheme and
-returns the integrity and diversity fields used by the chewBBACA Schema
+returns the integrity and diversity fields used by the chewBBACA Scheme
 Evaluator allele-analysis table. Static sequence metrics and allele lengths are
 stored inside the extracted scheme. Changing the minimum allele length
 therefore recalculates only the per-locus short-allele counts and does not
 reread FASTA sequences.
 
 The public :func:`get_scheme_allele_information` function is intended for the
-Marimo table in ``notebook.py`` and can also be imported by other Python code.
+Marimo table in ``notebooks/intrinsic.py`` and can also be imported by other
+Python code.
 """
 
 import argparse
@@ -28,6 +29,9 @@ from .info import (
 )
 
 SCHEME_ALLELE_INFORMATION_CACHE_FILENAME = ".scheme-allele-information-cache.json"
+SCHEME_ALLELE_INFORMATION_CACHE_FILENAMES = (
+    SCHEME_ALLELE_INFORMATION_CACHE_FILENAME,
+)
 SCHEME_ALLELE_INFORMATION_CACHE_VERSION = 6
 
 CODON_TO_AMINO_ACID = {
@@ -100,6 +104,7 @@ CODON_TO_AMINO_ACID = {
 __all__ = [
     "CODON_TO_AMINO_ACID",
     "SCHEME_ALLELE_INFORMATION_CACHE_FILENAME",
+    "SCHEME_ALLELE_INFORMATION_CACHE_FILENAMES",
     "SCHEME_ALLELE_INFORMATION_CACHE_VERSION",
     "LocusAlleleInformation",
     "get_scheme_allele_information",
@@ -111,7 +116,7 @@ class LocusAlleleInformation:
     """Integrity and diversity metrics for one locus.
 
     Attributes:
-        locus_name: Schema-relative locus name without a FASTA suffix.
+        locus_name: Scheme-relative locus name without a FASTA suffix.
         total_allele_count: Total number of FASTA records in the locus. Each
             record is treated as one nucleotide allele because the current
             scheme collection is expected to contain distinct allele records.
@@ -210,18 +215,18 @@ class _CachedSchemeAlleleAnalysis:
     locus_information: tuple[_CachedLocusAlleleInformation, ...]
 
 
-def _resolve_schema_directory_path(schema_directory_path: str | Path) -> Path:
+def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
     """Resolve and validate an extracted scheme directory."""
-    resolved_schema_directory_path = Path(schema_directory_path).resolve()
-    if not resolved_schema_directory_path.exists():
+    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
+    if not resolved_scheme_directory_path.exists():
         raise FileNotFoundError(
-            f"Schema directory does not exist: {resolved_schema_directory_path}"
+            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
         )
-    if not resolved_schema_directory_path.is_dir():
+    if not resolved_scheme_directory_path.is_dir():
         raise NotADirectoryError(
-            f"Schema path is not a directory: {resolved_schema_directory_path}"
+            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
         )
-    return resolved_schema_directory_path
+    return resolved_scheme_directory_path
 
 
 def _is_fasta_file(candidate_file_path: Path) -> bool:
@@ -232,20 +237,20 @@ def _is_fasta_file(candidate_file_path: Path) -> bool:
 
 
 def _find_allele_file_paths(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
 ) -> tuple[Path, ...]:
     """Return recognized locus FASTA files in deterministic order."""
     return tuple(
         sorted(
             candidate_file_path
-            for candidate_file_path in schema_directory_path.rglob("*")
+            for candidate_file_path in scheme_directory_path.rglob("*")
             if _is_fasta_file(candidate_file_path)
         )
     )
 
 
 def _remove_fasta_filename_suffix(relative_file_path: str) -> str:
-    """Remove a recognized FASTA suffix from a schema-relative path."""
+    """Remove a recognized FASTA suffix from a scheme-relative path."""
     lowercase_relative_file_path = relative_file_path.lower()
     for filename_suffix in sorted(FASTA_FILENAME_SUFFIXES, key=len, reverse=True):
         if lowercase_relative_file_path.endswith(filename_suffix):
@@ -378,7 +383,7 @@ def _count_length_outliers(allele_lengths: tuple[int, ...]) -> tuple[int, int]:
 
 
 def _analyze_locus(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     allele_file_path: Path,
 ) -> _CachedLocusAlleleInformation:
     """Calculate every static allele-analysis metric for one locus."""
@@ -417,7 +422,7 @@ def _analyze_locus(
         alleles_above_mode_threshold_count,
     ) = _count_length_outliers(immutable_allele_lengths)
     relative_allele_file_path = allele_file_path.relative_to(
-        schema_directory_path
+        scheme_directory_path
     ).as_posix()
     return _CachedLocusAlleleInformation(
         locus_name=_remove_fasta_filename_suffix(relative_allele_file_path),
@@ -441,7 +446,7 @@ def _analyze_locus(
 
 
 def _create_source_signature(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     allele_file_paths: Iterable[Path],
 ) -> tuple[tuple[str, int, int], ...]:
     """Create a file metadata signature for cache invalidation."""
@@ -451,7 +456,7 @@ def _create_source_signature(
         source_signature.append(
             (
                 allele_file_path.relative_to(
-                    schema_directory_path
+                    scheme_directory_path
                 ).as_posix(),
                 allele_file_status.st_size,
                 allele_file_status.st_mtime_ns,
@@ -461,12 +466,12 @@ def _create_source_signature(
 
 
 def _read_cached_analysis(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     source_signature: tuple[tuple[str, int, int], ...],
 ) -> _CachedSchemeAlleleAnalysis | None:
     """Read a compatible cached allele analysis, or return ``None``."""
     cache_file_path = (
-        schema_directory_path / SCHEME_ALLELE_INFORMATION_CACHE_FILENAME
+        scheme_directory_path / SCHEME_ALLELE_INFORMATION_CACHE_FILENAME
     )
     try:
         cached_data = json.loads(cache_file_path.read_text(encoding="utf-8"))
@@ -526,7 +531,7 @@ def _read_cached_analysis(
 
 
 def _write_cached_analysis(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     source_signature: tuple[tuple[str, int, int], ...],
     cached_analysis: _CachedSchemeAlleleAnalysis,
 ) -> None:
@@ -544,7 +549,7 @@ def _write_cached_analysis(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=schema_directory_path,
+            dir=scheme_directory_path,
             prefix=f"{SCHEME_ALLELE_INFORMATION_CACHE_FILENAME}.",
             delete=False,
         ) as temporary_cache_file:
@@ -552,7 +557,7 @@ def _write_cached_analysis(
             temporary_cache_file_path = Path(temporary_cache_file.name)
 
         temporary_cache_file_path.replace(
-            schema_directory_path / SCHEME_ALLELE_INFORMATION_CACHE_FILENAME
+            scheme_directory_path / SCHEME_ALLELE_INFORMATION_CACHE_FILENAME
         )
     finally:
         if temporary_cache_file_path is not None:
@@ -560,56 +565,87 @@ def _write_cached_analysis(
 
 
 def _get_or_create_cached_analysis(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
 ) -> _CachedSchemeAlleleAnalysis:
     """Return cached static metrics, scanning FASTA files only when needed."""
-    allele_file_paths = _find_allele_file_paths(schema_directory_path)
+    allele_file_paths = _find_allele_file_paths(scheme_directory_path)
     source_signature = _create_source_signature(
-        schema_directory_path,
+        scheme_directory_path,
         allele_file_paths,
     )
     cached_analysis = _read_cached_analysis(
-        schema_directory_path,
+        scheme_directory_path,
         source_signature,
     )
     if cached_analysis is not None:
         return cached_analysis
 
+    from .static_analysis import get_shared_scheme_static_analysis
+
+    shared_static_analysis = get_shared_scheme_static_analysis(
+        scheme_directory_path
+    )
     cached_analysis = _CachedSchemeAlleleAnalysis(
         locus_information=tuple(
-            _analyze_locus(schema_directory_path, allele_file_path)
-            for allele_file_path in allele_file_paths
+            _CachedLocusAlleleInformation(
+                locus_name=locus_analysis.locus_name,
+                total_allele_count=locus_analysis.allele_count,
+                valid_allele_count=locus_analysis.valid_allele_count,
+                distinct_protein_allele_count=(
+                    locus_analysis.distinct_protein_allele_count
+                ),
+                incomplete_orf_allele_count=(
+                    locus_analysis.incomplete_orf_allele_count
+                ),
+                ambiguous_bases_allele_count=(
+                    locus_analysis.ambiguous_bases_allele_count
+                ),
+                missing_start_or_stop_codon_allele_count=(
+                    locus_analysis.missing_start_or_stop_codon_allele_count
+                ),
+                in_frame_stop_codon_allele_count=(
+                    locus_analysis.in_frame_stop_codon_allele_count
+                ),
+                alleles_below_mode_threshold_count=(
+                    locus_analysis.alleles_below_mode_threshold_count
+                ),
+                alleles_above_mode_threshold_count=(
+                    locus_analysis.alleles_above_mode_threshold_count
+                ),
+                allele_lengths=locus_analysis.allele_lengths,
+            )
+            for locus_analysis in shared_static_analysis.loci
         ),
     )
     try:
         _write_cached_analysis(
-            schema_directory_path,
+            scheme_directory_path,
             source_signature,
             cached_analysis,
         )
     except OSError:
-        # Read-only schema directories can still be analyzed without caching.
+        # Read-only scheme directories can still be analyzed without caching.
         pass
     return cached_analysis
 
 
 def get_scheme_allele_information(
-    schema_directory_path: str | Path,
+    scheme_directory_path: str | Path,
     minimum_sequence_length: int = 0,
 ) -> tuple[LocusAlleleInformation, ...]:
     """Return chewBBACA-style allele-analysis fields for every locus.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
         minimum_sequence_length: Minimum accepted allele length in nucleotides.
             Only the short-allele counts depend on this value.
 
     Returns:
-        Per-locus allele information ordered by schema-relative FASTA path.
+        Per-locus allele information ordered by scheme-relative FASTA path.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         ValueError: If ``minimum_sequence_length`` is negative.
         OSError: If a FASTA file cannot be read or decompressed.
         UnicodeError: If a FASTA file is not valid UTF-8 text.
@@ -617,11 +653,11 @@ def get_scheme_allele_information(
     if minimum_sequence_length < 0:
         raise ValueError("minimum_sequence_length cannot be negative")
 
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
     cached_analysis = _get_or_create_cached_analysis(
-        resolved_schema_directory_path
+        resolved_scheme_directory_path
     )
     return tuple(
         LocusAlleleInformation(
@@ -682,7 +718,7 @@ def main() -> None:
         description="Calculate per-locus allele information for an MLST scheme."
     )
     argument_parser.add_argument(
-        "schema_directory",
+        "scheme_directory",
         type=Path,
         help="directory containing an extracted MLST scheme",
     )
@@ -696,7 +732,7 @@ def main() -> None:
     )
     command_line_arguments = argument_parser.parse_args()
     locus_information = get_scheme_allele_information(
-        command_line_arguments.schema_directory,
+        command_line_arguments.scheme_directory,
         minimum_sequence_length=command_line_arguments.minimum_sequence_length,
     )
     print(

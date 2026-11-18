@@ -10,42 +10,82 @@ def _():
     import sys as _sys
     from pathlib import Path
 
+    repository_root_directory_path = Path(__file__).resolve().parents[1]
+    _repository_root_text = str(repository_root_directory_path)
+    if _repository_root_text not in _sys.path:
+        _sys.path.insert(0, _repository_root_text)
+    scheme_cache_root_directory_path = (
+        repository_root_directory_path / ".cache" / "schemes"
+    )
+
     import altair as alt
     import marimo as mo
 
-    from schema import alignment as _alignment
-    from schema import allele_info as _allele_info
-    from schema import bsr as _bsr
-    from schema import cache as _cache
-    from schema import info as _info
-    from schema import similarity as _similarity
-    from schema import stats as _stats
+    from scheme import alignment as _alignment
+    from scheme import allele_info as _allele_info
+    from scheme import bsr as _bsr
+    from scheme import cache as _cache
+    from scheme import info as _info
+    from scheme import overview as _overview
+    from scheme import resources as _resources
+    from scheme import similarity as _similarity
+    from scheme import static_analysis as _static_analysis
+    from scheme import stats as _stats
 
-    _alignment_source_file = mo.watch.file("schema/alignment.py")
-    _allele_info_source_file = mo.watch.file("schema/allele_info.py")
-    _bsr_source_file = mo.watch.file("schema/bsr.py")
-    _cache_source_file = mo.watch.file("schema/cache.py")
-    _info_source_file = mo.watch.file("schema/info.py")
-    _similarity_source_file = mo.watch.file("schema/similarity.py")
-    _stats_source_file = mo.watch.file("schema/stats.py")
+    _alignment_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "alignment.py"
+    )
+    _allele_info_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "allele_info.py"
+    )
+    _bsr_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "bsr.py"
+    )
+    _cache_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "cache.py"
+    )
+    _info_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "info.py"
+    )
+    _overview_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "overview.py"
+    )
+    _resources_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "resources.py"
+    )
+    _similarity_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "similarity.py"
+    )
+    _static_analysis_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "static_analysis.py"
+    )
+    _stats_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "stats.py"
+    )
     _alignment_source_file.read_bytes()
     _allele_info_source_file.read_bytes()
     _bsr_source_file.read_bytes()
     _cache_source_file.read_bytes()
     _info_source_file.read_bytes()
+    _overview_source_file.read_bytes()
+    _resources_source_file.read_bytes()
     _similarity_source_file.read_bytes()
+    _static_analysis_source_file.read_bytes()
     _stats_source_file.read_bytes()
 
     _cache = _importlib.reload(_cache)
     _info = _importlib.reload(_info)
     _allele_info = _importlib.reload(_allele_info)
-    _bsr = _importlib.reload(_bsr)
     _stats = _importlib.reload(_stats)
+    _static_analysis = _importlib.reload(_static_analysis)
+    _resources = _importlib.reload(_resources)
     _alignment = _importlib.reload(_alignment)
     _similarity = _importlib.reload(_similarity)
+    _bsr = _importlib.reload(_bsr)
+    _overview = _importlib.reload(_overview)
 
-    calculate_schema_alignment_summary = (
-        _alignment.calculate_schema_alignment_summary
+    calculate_scheme_alignment_summary = (
+        _alignment.calculate_scheme_alignment_summary
     )
     classify_representative_bsr_analysis = (
         _bsr.classify_representative_bsr_analysis
@@ -53,20 +93,23 @@ def _():
     cache_archive = _cache.cache_archive
     clear_cache = _cache.clear_cache
     count_alleles_below_minimum_length = _info.count_alleles_below_minimum_length
-    create_schema_statistics_charts = _stats.create_schema_statistics_charts
+    create_intrinsic_scheme_overview = (
+        _overview.create_intrinsic_scheme_overview
+    )
+    create_scheme_statistics_charts = _stats.create_scheme_statistics_charts
     default_amino_acid_gap_warning_threshold_percentage = (
         _alignment.DEFAULT_AMINO_ACID_GAP_WARNING_THRESHOLD_PERCENTAGE
     )
     default_alignment_strategy = _alignment.DEFAULT_ALIGNMENT_STRATEGY
     alignment_strategy_labels = _alignment.ALIGNMENT_STRATEGY_LABELS
     get_scheme_allele_information = _allele_info.get_scheme_allele_information
-    get_schema_information = _info.get_schema_information
-    get_schema_alignment_analysis = _alignment.get_schema_alignment_analysis
-    get_schema_representative_bsr_analysis = (
-        _bsr.get_schema_representative_bsr_analysis
+    get_scheme_information = _info.get_scheme_information
+    get_scheme_alignment_analysis = _alignment.get_scheme_alignment_analysis
+    get_scheme_representative_bsr_analysis = (
+        _bsr.get_scheme_representative_bsr_analysis
     )
-    get_schema_similarity_analysis = (
-        _similarity.get_schema_similarity_analysis
+    get_scheme_similarity_analysis = (
+        _similarity.get_scheme_similarity_analysis
     )
     classify_candidate_paralogous_locus_pairs = (
         _similarity.classify_candidate_paralogous_locus_pairs
@@ -90,49 +133,66 @@ def _():
     default_frequent_peak_relative_threshold_percentage = (
         _stats.DEFAULT_FREQUENT_PEAK_RELATIVE_THRESHOLD_PERCENTAGE
     )
-    get_schema_statistics = _stats.get_schema_statistics
+    available_cpu_count = _resources.get_available_cpu_count()
+    default_worker_count = _resources.calculate_default_worker_count(
+        available_cpu_count
+    )
+    get_scheme_statistics = _stats.get_scheme_statistics
     mafft_progress_output_stream = _sys.__stdout__ or _sys.stdout
     representative_bsr_progress_output_stream = _sys.__stdout__ or _sys.stdout
     similarity_progress_output_stream = _sys.__stdout__ or _sys.stdout
-    analysis_cache_filenames = (
-        _alignment.SCHEMA_ALIGNMENT_CACHE_FILENAME,
-        _bsr.SCHEMA_REPRESENTATIVE_BSR_CACHE_FILENAME,
-        _info.SCHEMA_INFORMATION_CACHE_FILENAME,
-        _similarity.SCHEMA_SIMILARITY_CACHE_FILENAME,
-        _stats.SCHEMA_STATISTICS_CACHE_FILENAME,
-        _allele_info.SCHEME_ALLELE_INFORMATION_CACHE_FILENAME,
+    analysis_cache_filename_groups = (
+        _alignment.SCHEME_ALIGNMENT_CACHE_FILENAMES,
+        _bsr.SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAMES,
+        (
+            _info.SCHEME_INFORMATION_CACHE_FILENAMES
+            + _static_analysis.SCHEME_STATIC_ANALYSIS_CACHE_FILENAMES
+        ),
+        _similarity.SCHEME_SIMILARITY_CACHE_FILENAMES,
+        (
+            _stats.SCHEME_STATISTICS_CACHE_FILENAMES
+            + _static_analysis.SCHEME_STATIC_ANALYSIS_CACHE_FILENAMES
+        ),
+        (
+            _allele_info.SCHEME_ALLELE_INFORMATION_CACHE_FILENAMES
+            + _static_analysis.SCHEME_STATIC_ANALYSIS_CACHE_FILENAMES
+        ),
     )
 
     return (
-        Path,
         CandidateParalogThresholds,
         alt,
         alignment_strategy_labels,
-        analysis_cache_filenames,
-        calculate_schema_alignment_summary,
+        analysis_cache_filename_groups,
+        available_cpu_count,
+        calculate_scheme_alignment_summary,
         cache_archive,
         classify_candidate_paralogous_locus_pairs,
         classify_representative_bsr_analysis,
         clear_cache,
         count_alleles_below_minimum_length,
-        create_schema_statistics_charts,
+        create_intrinsic_scheme_overview,
+        create_scheme_statistics_charts,
         default_candidate_paralog_amino_acid_identity_threshold_percentage,
         default_amino_acid_gap_warning_threshold_percentage,
         default_alignment_strategy,
         default_frequent_peak_relative_threshold_percentage,
+        default_worker_count,
         default_repeated_homology_nucleotide_alignment_length_threshold,
         default_repeated_homology_nucleotide_identity_threshold_percentage,
         default_representative_bsr_threshold,
         default_same_gene_blast_score_ratio_threshold,
         get_scheme_allele_information,
-        get_schema_alignment_analysis,
-        get_schema_information,
-        get_schema_representative_bsr_analysis,
-        get_schema_similarity_analysis,
-        get_schema_statistics,
+        get_scheme_alignment_analysis,
+        get_scheme_information,
+        get_scheme_representative_bsr_analysis,
+        get_scheme_similarity_analysis,
+        get_scheme_statistics,
         mafft_progress_output_stream,
         mo,
         representative_bsr_progress_output_stream,
+        repository_root_directory_path,
+        scheme_cache_root_directory_path,
         similarity_progress_output_stream,
     )
 
@@ -155,62 +215,72 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Schema Evaluation
+    # Scheme Evaluation
 
-    ## Schema Summary Data
-    - Loci: Total number of loci that were evaluated.
-    - Alleles: Total number of alleles.
-    - Valid Alleles: Total number of valid alleles. An allele is considered valid if its sequence size is a multiple of 3, if it has a single start and stop codon, if has no in-frame stop codons, and if it contains no ambiguous bases.
-    - Invalid Alleles: Sum of the Incomplete ORF, Ambiguous Bases, Missing Start/Stop Codon, and In-frame Stop Codon counts.
-    - Incomplete ORF: Alleles whose sequence size is not a multiple of 3.
-    - Ambiguous Bases: Alleles containing characters other than A, C, T, or G.
-    - Missing Start/Stop Codon: Alleles missing a recognized start codon, stop codon, or both.
-    - In-frame Stop Codon: Alleles containing an in-frame stop codon before the sequence endpoint.
-    - GC Content: Percentage of pooled canonical bases that are G or C. A, C, G, and T form the denominator; ambiguous and other noncanonical characters are excluded and reported separately.
-    - Alleles below minimum length: Alleles shorter than the selected minimum sequence length in nucleotides.
-    - Length outliers: Scheme-wide totals of alleles strictly below 80% or above 120% of their respective locus's modal allele length.
+    The overview below is the consistent home for scheme-wide measurements.
+    Static FASTA-derived results appear automatically. Expensive alignment and
+    similarity sections remain pending until requested, then update in place.
+    Detailed methodology, evidence tables, plots, thresholds, limitations, and
+    provenance remain in their corresponding sections later in the notebook.
     """)
 
 
 @app.cell
 def _(mo):
-    get_schema_reset, set_schema_reset = mo.state(0)
-    return get_schema_reset, set_schema_reset
+    get_scheme_reset, set_scheme_reset = mo.state(0)
+    return get_scheme_reset, set_scheme_reset
 
 
 @app.cell
-def _(Path, get_schema_reset, mo):
-    get_schema_reset()
-    schema_paths = sorted(
+def _(get_scheme_reset, mo, repository_root_directory_path):
+    get_scheme_reset()
+    scheme_paths = sorted(
         archive_file_path
-        for archive_file_path in Path("archive").rglob("*.tar.*")
+        for archive_file_path in (
+            repository_root_directory_path / "archive"
+        ).rglob("*.tar.*")
         if "BUSCO_bac" not in archive_file_path.parts
     )
-    schema_options = {
-        str(archive_file_path): archive_file_path for archive_file_path in schema_paths
+    scheme_options = {
+        archive_file_path.relative_to(repository_root_directory_path).as_posix(): (
+            archive_file_path
+        )
+        for archive_file_path in scheme_paths
     }
 
-    schema = mo.ui.dropdown(
-        options=schema_options,
+    scheme = mo.ui.dropdown(
+        options=scheme_options,
         label="Scheme archive",
         searchable=True,
     )
-    mo.vstack([schema])
-    return (schema,)
+    mo.vstack([scheme])
+    return (scheme,)
 
 
 @app.cell
-def _(analysis_cache_filenames, cache_archive, mo, schema):
-    mo.stop(schema.value is None, mo.md("Select a scheme archive to continue."))
+def _(
+    analysis_cache_filename_groups,
+    cache_archive,
+    mo,
+    scheme,
+    scheme_cache_root_directory_path,
+):
+    mo.stop(scheme.value is None, mo.md("Select a scheme archive to continue."))
 
     with mo.status.spinner(
         title="Loading selected scheme archive",
         subtitle="Reusing the extraction cache when available.",
     ):
-        scheme_path = cache_archive(schema.value)
+        scheme_path = cache_archive(
+            scheme.value,
+            scheme_cache_root_directory_path,
+        )
     unavailable_analysis_cache_count = sum(
-        not (scheme_path / cache_filename).is_file()
-        for cache_filename in analysis_cache_filenames
+        not any(
+            (scheme_path / cache_filename).is_file()
+            for cache_filename in cache_filename_group
+        )
+        for cache_filename_group in analysis_cache_filename_groups
     )
     mo.md(f"Using cached scheme at `{scheme_path}`")
     return scheme_path, unavailable_analysis_cache_count
@@ -220,18 +290,20 @@ def _(analysis_cache_filenames, cache_archive, mo, schema):
 def _(mo, unavailable_analysis_cache_count):
     if unavailable_analysis_cache_count:
         _analysis_cache_notice = mo.callout(
-            "Analysis results are not fully cached for this scheme. The "
-            "initial computation may take longer for schemes with many loci "
-            "or alleles. Results will be cached for subsequent sessions.",
+            "Some analysis results are not cached for this scheme. Static "
+            "summary, locus, and allele analyses load automatically. MAFFT "
+            "and BLAST remain idle until you request an individual stage or "
+            "the complete intrinsic evaluation; uncached requested stages "
+            "may take longer and will be cached for later sessions.",
             kind="warn",
         )
     else:
         _analysis_cache_notice = mo.callout(
-            "Analysis cache files are available for this scheme. Statistics "
-            "and the allele table can be loaded without recalculating their "
-            "static metrics; the alignment stage will still verify each "
-            "per-locus cache entry and process changed, incomplete, or "
-            "previously failed loci.",
+            "Analysis cache files are available for this scheme. Static "
+            "results load automatically, while MAFFT and BLAST stages still "
+            "wait for an explicit run request. Requested stages validate "
+            "their cache provenance and process changed, incomplete, or "
+            "previously failed work as applicable.",
             kind="info",
         )
     mo.vstack([_analysis_cache_notice])
@@ -251,20 +323,23 @@ def _(mo):
 
 
 @app.cell
-def _(get_schema_information, mo, scheme_path):
+def _(get_scheme_information, mo, scheme_path):
     with mo.status.spinner(
         title="Calculating scheme summary",
-        subtitle="Scanning allele records when no summary cache is available.",
+        subtitle=(
+            "Loading the shared static analysis or scanning every allele "
+            "record once."
+        ),
     ):
-        schema_information = get_schema_information(scheme_path)
-    return (schema_information,)
+        scheme_information = get_scheme_information(scheme_path)
+    return (scheme_information,)
 
 
 @app.cell
 def _(
     count_alleles_below_minimum_length,
     minimum_sequence_length_input,
-    schema_information,
+    scheme_information,
     scheme_path,
 ):
     minimum_sequence_length = int(minimum_sequence_length_input.value or 0)
@@ -277,45 +352,308 @@ def _(
 
 @app.cell
 def _(
-    alleles_below_minimum_length_count,
+    candidate_paralog_analysis,
+    create_intrinsic_scheme_overview,
+    frequent_peak_relative_threshold_percentage,
+    locus_statistics,
     minimum_sequence_length,
-    mo,
-    schema_information,
+    representative_bsr_classification,
+    scheme_alignment_analysis,
+    scheme_alignment_summary,
+    scheme_allele_information,
+    scheme_information,
+    scheme_representative_bsr_analysis,
+    scheme_similarity_analysis,
+    alleles_below_minimum_length_count,
 ):
-    schema_summary_displayed = True
-    _guanine_cytosine_content_label = (
-        "Unavailable (no canonical bases)"
-        if schema_information.guanine_cytosine_content_percentage is None
-        else f"{schema_information.guanine_cytosine_content_percentage:.2f}%"
+    intrinsic_scheme_overview = create_intrinsic_scheme_overview(
+        scheme_information=scheme_information,
+        locus_statistics=locus_statistics,
+        scheme_allele_information=scheme_allele_information,
+        minimum_sequence_length=minimum_sequence_length,
+        alleles_below_minimum_length_count=(
+            alleles_below_minimum_length_count
+        ),
+        frequent_peak_relative_threshold_percentage=(
+            frequent_peak_relative_threshold_percentage
+        ),
+        scheme_alignment_analysis=scheme_alignment_analysis,
+        scheme_alignment_summary=scheme_alignment_summary,
+        scheme_similarity_analysis=scheme_similarity_analysis,
+        candidate_paralog_analysis=candidate_paralog_analysis,
+        scheme_representative_bsr_analysis=(
+            scheme_representative_bsr_analysis
+        ),
+        representative_bsr_classification=(
+            representative_bsr_classification
+        ),
     )
-    mo.md(
-        f"""
-        ## Selected schema summary data
+    return (intrinsic_scheme_overview,)
 
-        - **Loci:** {schema_information.locus_count:,}
-        - **Alleles:** {schema_information.allele_count:,}
-        - **Valid alleles:** {schema_information.valid_allele_count:,}
-        - **Invalid alleles:** {schema_information.invalid_allele_count:,}
-        - **Incomplete ORF:** {schema_information.incomplete_orf_allele_count:,}
-        - **Ambiguous bases:** {schema_information.ambiguous_bases_allele_count:,}
-        - **Missing start/stop codon:** {schema_information.missing_start_or_stop_codon_allele_count:,}
-        - **In-frame stop codon:** {schema_information.in_frame_stop_codon_allele_count:,}
-        - **GC content:** {_guanine_cytosine_content_label}
-        - **Canonical bases in GC denominator:** {schema_information.canonical_nucleotide_base_count:,}
-        - **Noncanonical bases excluded from GC denominator:** {schema_information.excluded_nucleotide_base_count:,}
-        - **Alleles <{minimum_sequence_length:,} bp:** {alleles_below_minimum_length_count:,}
-        - **Alleles <80% of locus mode:** {schema_information.alleles_below_locus_mode_threshold_count:,} ({schema_information.alleles_below_locus_mode_threshold_percentage:.2f}%)
-        - **Alleles >120% of locus mode:** {schema_information.alleles_above_locus_mode_threshold_count:,} ({schema_information.alleles_above_locus_mode_threshold_percentage:.2f}%)
-        """
+
+@app.cell(hide_code=True)
+def _(intrinsic_scheme_overview, mo):
+    _static = intrinsic_scheme_overview.static
+    _scheme = _static.scheme_information
+    _gc_content_label = (
+        "Unavailable (no canonical bases)"
+        if _scheme.guanine_cytosine_content_percentage is None
+        else f"{_scheme.guanine_cytosine_content_percentage:.2f}%"
     )
-    return (schema_summary_displayed,)
+
+    _overview_sections = [
+        mo.md(
+            f"""
+            ## Intrinsic Scheme Overview
+
+            Static measurements appear immediately. Requested MAFFT and BLAST
+            stages update their overview sections when they finish; a pending
+            section does not trigger computation. Screening counts use the
+            currently selected thresholds and are descriptive, not an overall
+            scheme pass/fail decision.
+
+            ### Static sequence and locus measurements
+
+            - **Scale:** {_scheme.locus_count:,} loci and
+              {_scheme.allele_count:,} allele records.
+            - **CDS integrity:** {_scheme.valid_allele_count:,} valid alleles;
+              {_scheme.invalid_allele_count:,} invalidity observations across
+              {_static.invalid_allele_locus_count:,} loci. The invalid count is
+              a sum of categories, so one allele can contribute more than once.
+            - **Loci without a valid CDS:**
+              {_static.no_valid_allele_locus_count:,}.
+            - **Invalidity categories:**
+              {_scheme.incomplete_orf_allele_count:,} incomplete ORF;
+              {_scheme.ambiguous_bases_allele_count:,} ambiguous bases;
+              {_scheme.missing_start_or_stop_codon_allele_count:,} missing
+              start/stop codon; {_scheme.in_frame_stop_codon_allele_count:,}
+              in-frame stop codon.
+            - **Minimum-length view:**
+              {_static.alleles_below_minimum_length_count:,} alleles in
+              {_static.short_allele_locus_count:,} loci are shorter than
+              {_static.minimum_sequence_length:,} bp.
+            - **Length distributions at the
+              {_static.frequent_peak_relative_threshold_percentage:g}% peak
+              setting:** {_static.single_mode_locus_count:,} single-mode,
+              {_static.multimodal_locus_count:,} multimodal, and
+              {_static.empty_locus_count:,} empty loci;
+              {_static.length_outlier_locus_count:,} loci contain a strict
+              80/120%-of-mode outlier.
+            - **Allele-level modal outliers:**
+              {_scheme.alleles_below_locus_mode_threshold_count:,} below 80%
+              ({_scheme.alleles_below_locus_mode_threshold_percentage:.2f}%)
+              and {_scheme.alleles_above_locus_mode_threshold_count:,} above
+              120%
+              ({_scheme.alleles_above_locus_mode_threshold_percentage:.2f}%).
+            - **Pooled GC content:** {_gc_content_label} from
+              {_scheme.canonical_nucleotide_base_count:,} canonical bases;
+              {_scheme.excluded_nucleotide_base_count:,} noncanonical bases
+              were excluded from the denominator.
+            """
+        )
+    ]
+
+    _alignment = intrinsic_scheme_overview.alignment
+    if _alignment is None:
+        _overview_sections.extend(
+            [
+                mo.md("### Within-locus alignment — pending"),
+                mo.callout(
+                    "Run the alignment stage to add MAFFT availability, "
+                    "polymorphism, and advisory gap measurements.",
+                    kind="info",
+                ),
+            ]
+        )
+    else:
+        _alignment_summary = _alignment.summary
+        _polymorphism_percentage_label = (
+            "unavailable"
+            if _alignment.nucleotide_polymorphic_site_percentage is None
+            else (
+                f"{_alignment.nucleotide_polymorphic_site_percentage:.2f}%"
+            )
+        )
+        _overview_sections.append(
+            mo.md(
+                f"""
+                ### Within-locus alignment — complete
+
+                - **Nucleotide availability:**
+                  {_alignment_summary.nucleotide_aligned_locus_count:,} aligned,
+                  {_alignment_summary.nucleotide_unavailable_locus_count:,}
+                  unavailable, and
+                  {_alignment_summary.nucleotide_failed_locus_count:,} failed
+                  loci.
+                - **Amino-acid availability:**
+                  {_alignment_summary.amino_acid_aligned_locus_count:,} aligned,
+                  {_alignment_summary.amino_acid_unavailable_locus_count:,}
+                  unavailable, and
+                  {_alignment_summary.amino_acid_failed_locus_count:,} failed
+                  loci.
+                - **Pooled substitution polymorphism:**
+                  {_alignment.nucleotide_polymorphic_site_count:,} of
+                  {_alignment.nucleotide_callable_site_count:,} callable sites
+                  ({_polymorphism_percentage_label}) across
+                  {_alignment.polymorphic_locus_count:,} loci with at least one
+                  polymorphic site.
+                - **Advisory amino-acid gap flag:**
+                  {_alignment_summary.amino_acid_gap_warning_locus_count:,} of
+                  {_alignment_summary.amino_acid_aligned_locus_count:,} aligned
+                  loci are strictly above
+                  {_alignment_summary.amino_acid_gap_warning_threshold_percentage:g}%.
+                - **Provenance:**
+                  `{_alignment.analysis.alignment_method_identifier}`;
+                  `{_alignment.analysis.mafft_version}`.
+                """
+            )
+        )
+
+    _similarity = intrinsic_scheme_overview.similarity
+    if _similarity is None:
+        _overview_sections.extend(
+            [
+                mo.md("### Cross-locus similarity — pending"),
+                mo.callout(
+                    "Run cross-locus similarity to add selected-allele BLAST "
+                    "coverage and candidate-paralog screening counts.",
+                    kind="info",
+                ),
+            ]
+        )
+    else:
+        _similarity_analysis = _similarity.analysis
+        _candidate = _similarity.candidate_paralog_analysis
+        _candidate_summary = (
+            "Threshold classification is updating."
+            if _candidate is None
+            else (
+                f"{_candidate.candidate_pair_count:,} candidate pairs "
+                f"involving {_candidate.candidate_locus_count:,} loci; "
+                f"{_candidate.amino_acid_candidate_pair_count:,} meet the "
+                "amino-acid criterion, "
+                f"{_candidate.nucleotide_candidate_pair_count:,} meet the "
+                "nucleotide criterion, and "
+                f"{_candidate.blast_score_ratio_evidence_pair_count:,} "
+                "evaluated pairs reach the supplementary BSR reference."
+            )
+        )
+        _candidate_threshold_summary = (
+            ""
+            if _candidate is None
+            else (
+                "Applied screening values: amino-acid identity "
+                f">{_candidate.thresholds.amino_acid_identity_threshold_percentage:g}%; "
+                "nucleotide identity "
+                f"≥{_candidate.thresholds.nucleotide_identity_threshold_percentage:g}% "
+                "across >"
+                f"{_candidate.thresholds.nucleotide_alignment_length_threshold:,} "
+                "bp; supplementary directional BSR "
+                f"≥{_candidate.thresholds.blast_score_ratio_threshold:g}."
+            )
+        )
+        _overview_sections.append(
+            mo.md(
+                f"""
+                ### Cross-locus similarity — complete
+
+                - **Selected loci:**
+                  {_similarity_analysis.nucleotide_selected_locus_count:,}
+                  nucleotide and
+                  {_similarity_analysis.amino_acid_selected_locus_count:,}
+                  translated selections from
+                  {_similarity_analysis.locus_count:,} loci.
+                - **BLAST-reported directed hits:**
+                  {_similarity_analysis.nucleotide_match_count:,} of
+                  {_similarity_analysis.nucleotide_possible_directed_pair_count:,}
+                  possible nucleotide pairs and
+                  {_similarity_analysis.amino_acid_match_count:,} of
+                  {_similarity_analysis.amino_acid_possible_directed_pair_count:,}
+                  possible amino-acid pairs.
+                - **Candidate-locus screen:** {_candidate_summary}
+                - **Current references:** {_candidate_threshold_summary}
+                - **Provenance:** `{_similarity_analysis.method_identifier}`;
+                  `{_similarity_analysis.blastn_version}`;
+                  `{_similarity_analysis.blastp_version}`; E-value
+                  `{_similarity_analysis.blast_evalue:g}`.
+                """
+            )
+        )
+
+    _representative_bsr = intrinsic_scheme_overview.representative_bsr
+    if _representative_bsr is None:
+        _overview_sections.extend(
+            [
+                mo.md("### Representative-versus-allele BSR — pending"),
+                mo.callout(
+                    "Run representative BSR to add protein coverage and "
+                    "inter-locus high-BSR similarity-group measurements.",
+                    kind="info",
+                ),
+            ]
+        )
+    else:
+        _representative_analysis = _representative_bsr.analysis
+        _classification = _representative_bsr.classification
+        _coverage_percentage_label = (
+            "updating"
+            if _classification is None
+            else (
+                "unavailable"
+                if _classification.covered_allele_percentage is None
+                else f"{_classification.covered_allele_percentage:.2f}%"
+            )
+        )
+        _classification_summary = (
+            "Threshold classification is updating."
+            if _classification is None
+            else (
+                f"{_classification.covered_allele_count:,} of "
+                f"{_classification.measurable_allele_count:,} measurable "
+                f"alleles ({_coverage_percentage_label}) are covered at BSR "
+                f"≥{_classification.blast_score_ratio_threshold:g}; "
+                f"{_classification.incomplete_coverage_locus_count:,} loci "
+                "have incomplete measurable coverage."
+            )
+        )
+        _high_bsr_summary = (
+            ""
+            if _classification is None
+            else (
+                f"{len(_classification.high_bsr_pairs):,} pairs involving "
+                f"{_classification.high_bsr_locus_count:,} loci form "
+                f"{len(_classification.high_bsr_groups):,} connected groups."
+            )
+        )
+        _overview_sections.append(
+            mo.md(
+                f"""
+                ### Representative-versus-allele BSR — complete
+
+                - **Representative availability:**
+                  {_representative_analysis.representative_locus_count:,} of
+                  {_representative_analysis.locus_count:,} loci have an
+                  approximate representative;
+                  {_representative_analysis.self_score_locus_count:,} have a
+                  usable BLASTp self score.
+                - **Within-locus coverage:** {_classification_summary}
+                - **Inter-locus high-BSR evidence:** {_high_bsr_summary}
+                - **Provenance:**
+                  `{_representative_analysis.method_identifier}`;
+                  `{_representative_analysis.blastp_version}`; E-value
+                  `{_representative_analysis.blast_evalue:g}`.
+                """
+            )
+        )
+
+    mo.vstack(_overview_sections, gap=2)
 
 
 @app.cell(hide_code=True)
 def _(
     default_frequent_peak_relative_threshold_percentage,
     mo,
-    schema_summary_displayed,
+    scheme_information,
 ):
     frequent_peak_relative_threshold_input = mo.ui.number(
         start=0,
@@ -325,7 +663,6 @@ def _(
         debounce=True,
         label="Frequent peak minimum relative height (%)",
     )
-    locus_statistics_section_ready = schema_summary_displayed
     mo.vstack(
         [
             mo.md(
@@ -376,15 +713,14 @@ def _(
             frequent_peak_relative_threshold_input,
         ]
     )
-    return frequent_peak_relative_threshold_input, locus_statistics_section_ready
+    return (frequent_peak_relative_threshold_input,)
 
 
 @app.cell
 def _(
-    create_schema_statistics_charts,
+    create_scheme_statistics_charts,
     frequent_peak_relative_threshold_input,
-    get_schema_statistics,
-    locus_statistics_section_ready,
+    get_scheme_statistics,
     mo,
     scheme_path,
 ):
@@ -395,17 +731,17 @@ def _(
         frequent_peak_relative_threshold_percentage = float(
             frequent_peak_relative_threshold_input.value
         )
-        locus_statistics = get_schema_statistics(
+        locus_statistics = get_scheme_statistics(
             scheme_path,
             frequent_peak_relative_threshold_percentage=(
                 frequent_peak_relative_threshold_percentage
             ),
         )
-        schema_statistics_charts = create_schema_statistics_charts(locus_statistics)
+        scheme_statistics_charts = create_scheme_statistics_charts(locus_statistics)
     return (
         frequent_peak_relative_threshold_percentage,
         locus_statistics,
-        schema_statistics_charts,
+        scheme_statistics_charts,
     )
 
 
@@ -414,30 +750,30 @@ def _(
     frequent_peak_relative_threshold_percentage,
     locus_statistics,
     mo,
-    schema_statistics_charts,
+    scheme_statistics_charts,
 ):
     total_alleles_chart = mo.ui.altair_chart(
-        schema_statistics_charts.total_alleles_chart,
+        scheme_statistics_charts.total_alleles_chart,
         chart_selection=False,
         legend_selection=False,
     )
     allele_mode_size_chart = mo.ui.altair_chart(
-        schema_statistics_charts.allele_mode_size_chart,
+        scheme_statistics_charts.allele_mode_size_chart,
         chart_selection=False,
         legend_selection=False,
     )
     locus_statistics_chart = mo.ui.altair_chart(
-        schema_statistics_charts.locus_statistics_chart,
+        scheme_statistics_charts.locus_statistics_chart,
         chart_selection=False,
         legend_selection=False,
     )
     allele_size_variation_chart = mo.ui.altair_chart(
-        schema_statistics_charts.allele_size_variation_chart,
+        scheme_statistics_charts.allele_size_variation_chart,
         chart_selection=False,
         legend_selection=False,
     )
     guanine_cytosine_content_chart = mo.ui.altair_chart(
-        schema_statistics_charts.guanine_cytosine_content_chart,
+        scheme_statistics_charts.guanine_cytosine_content_chart,
         chart_selection=False,
         legend_selection=False,
     )
@@ -619,7 +955,6 @@ def _(
             "table.",
             kind="info",
         )
-    locus_statistics_displayed = True
     mo.vstack(
         [
             mo.md(
@@ -665,34 +1000,28 @@ def _(
         ],
         gap=2,
     )
-    return (locus_statistics_displayed,)
 
 
 @app.cell(hide_code=True)
-def _(locus_statistics_displayed, mo):
-    allele_analysis_section_ready = locus_statistics_displayed
-    mo.md(
-        """
-        ---
+def _(locus_statistics, mo):
+    mo.md(r"""
+    ---
 
-        # Allele Analysis
+    # Allele Analysis
 
-        Per-locus allele integrity and diversity metrics derived from the
-        cached allele-record analysis. Each FASTA record is treated as a
-        distinct nucleotide allele because the current scheme collection is
-        expected to contain distinct allele records. Valid CDS alleles are
-        translated and collapsed by protein sequence, so synonymous nucleotide
-        alleles can contribute one distinct translated protein. Invalid or
-        untranslatable alleles do not contribute a protein. These counts are
-        independent of the **Minimum allele length** control.
-        """
-    )
-    return (allele_analysis_section_ready,)
+    Per-locus allele integrity and diversity metrics derived from the cached
+    allele-record analysis. Each FASTA record is treated as a distinct
+    nucleotide allele because the current scheme collection is expected to
+    contain distinct allele records. Valid CDS alleles are translated and
+    collapsed by protein sequence, so synonymous nucleotide alleles can
+    contribute one distinct translated protein. Invalid or untranslatable
+    alleles do not contribute a protein. These counts are independent of the
+    **Minimum allele length** control.
+    """)
 
 
 @app.cell
 def _(
-    allele_analysis_section_ready,
     get_scheme_allele_information,
     minimum_sequence_length,
     mo,
@@ -808,18 +1137,82 @@ def _(
         max_columns=None,
         max_height=600,
     )
-    allele_analysis_displayed = True
     mo.vstack([allele_information_table])
-    return (allele_analysis_displayed,)
+
+
+@app.cell
+def _(scheme_information):
+    static_analysis_ready = True
+    return (static_analysis_ready,)
+
+
+@app.cell(hide_code=True)
+def _(
+    available_cpu_count,
+    default_worker_count,
+    mo,
+    static_analysis_ready,
+):
+    run_complete_evaluation_button = mo.ui.run_button(
+        kind="success",
+        label="Run complete intrinsic evaluation",
+        tooltip=(
+            "Run all three cached external-tool analyses for the selected "
+            "scheme."
+        ),
+    )
+    worker_budget_input = mo.ui.number(
+        start=1,
+        stop=available_cpu_count,
+        step=1,
+        value=default_worker_count,
+        debounce=True,
+        label="Maximum workers / BLAST threads",
+    )
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ---
+
+                # Expensive Analyses
+
+                The static scheme summary, locus statistics, and allele table
+                above load automatically. The MAFFT and BLAST analyses below
+                run only when requested. You can run each stage independently
+                in its section, or request the complete intrinsic evaluation
+                here. Existing compatible caches are reused in either case.
+
+                **Compute budget:** all three stages use the worker limit
+                below. The default is 80% of the {available_cpu_count:,}
+                logical CPUs available to this process, rounded down to an
+                even count when possible (minimum one). Reduce it on a shared
+                or memory-constrained machine, or select all available CPUs
+                when maximum throughput is appropriate. This setting changes
+                scheduling only and is not part of the scientific cache key.
+                """
+            ),
+            worker_budget_input,
+            run_complete_evaluation_button,
+        ],
+        gap=1,
+    )
+    return (run_complete_evaluation_button, worker_budget_input)
+
+
+@app.cell
+def _(worker_budget_input):
+    maximum_worker_count = int(worker_budget_input.value or 1)
+    return (maximum_worker_count,)
 
 
 @app.cell
 def _(
-    allele_analysis_displayed,
     alignment_strategy_labels,
     default_amino_acid_gap_warning_threshold_percentage,
     default_alignment_strategy,
     mo,
+    static_analysis_ready,
 ):
     amino_acid_gap_warning_threshold_input = mo.ui.number(
         start=0,
@@ -839,7 +1232,10 @@ def _(
         value=alignment_strategy_labels[default_alignment_strategy],
         label="MAFFT alignment strategy",
     )
-    alignment_section_ready = allele_analysis_displayed
+    run_alignment_analysis_button = mo.ui.run_button(
+        label="Run alignment analysis",
+        tooltip="Run or refresh the selected MAFFT alignment strategy.",
+    )
     mo.vstack(
         [
             mo.md(
@@ -863,9 +1259,9 @@ def _(
 
                 **Method and scientific choices**
 
-                - Loci are processed concurrently across every CPU available
-                  to the Marimo process. Each MAFFT subprocess uses one thread
-                  to avoid nested oversubscription.
+                - Loci are processed concurrently up to the shared **Maximum
+                  workers / BLAST threads** setting above. Each MAFFT
+                  subprocess uses one thread to avoid nested oversubscription.
                 - Unchanged loci are reused from a versioned per-locus cache.
                   New, modified, interrupted, or previously failed loci are
                   processed and checkpointed incrementally.
@@ -901,106 +1297,129 @@ def _(
             ),
             alignment_strategy_input,
             amino_acid_gap_warning_threshold_input,
+            run_alignment_analysis_button,
         ],
         gap=1,
     )
     return (
-        alignment_section_ready,
         alignment_strategy_input,
         amino_acid_gap_warning_threshold_input,
+        run_alignment_analysis_button,
     )
 
 
 @app.cell
 def _(
-    alignment_section_ready,
     alignment_strategy_input,
     alignment_strategy_labels,
     default_alignment_strategy,
-    get_schema_alignment_analysis,
+    get_scheme_alignment_analysis,
     locus_statistics,
     mafft_progress_output_stream,
+    maximum_worker_count,
     mo,
+    run_alignment_analysis_button,
+    run_complete_evaluation_button,
     scheme_path,
 ):
-    selected_alignment_strategy = (
-        alignment_strategy_input.value or default_alignment_strategy
+    _alignment_requested = (
+        run_alignment_analysis_button.value
+        or run_complete_evaluation_button.value
     )
-    selected_alignment_strategy_label = alignment_strategy_labels[
-        selected_alignment_strategy
-    ]
-    _completed_locus_count = [0]
-    with mo.status.progress_bar(
-        total=len(locus_statistics),
-        title=(
-            "Preparing nucleotide and amino-acid alignments with "
-            f"{selected_alignment_strategy_label}"
-        ),
-        subtitle="Checking the per-locus cache.",
-        completion_title="Alignment analysis complete",
-        completion_subtitle="All current loci have alignment measurements.",
-        show_rate=True,
-        show_eta=True,
-        remove_on_exit=False,
-    ) as _alignment_progress_bar:
-
-        def _update_alignment_progress(alignment_progress):
-            progress_increment = max(
-                0,
-                alignment_progress.completed_locus_count - _completed_locus_count[0],
-            )
-            if alignment_progress.current_locus_name is None:
-                progress_subtitle = (
-                    f"Reused {alignment_progress.cached_locus_count:,} cached "
-                    f"loci; "
-                    f"{alignment_progress.total_locus_count - alignment_progress.cached_locus_count:,} "
-                    "require processing."
-                )
-            else:
-                progress_rate = (
-                    f" at {alignment_progress.newly_completed_loci_per_second:.2f} loci/s"
-                    if alignment_progress.newly_completed_loci_per_second is not None
-                    else ""
-                )
-                progress_subtitle = (
-                    f"Completed {alignment_progress.current_locus_name}; "
-                    f"{alignment_progress.cached_locus_count:,} loci came "
-                    f"from cache{progress_rate}; elapsed "
-                    f"{alignment_progress.elapsed_seconds:.1f}s."
-                )
-            _alignment_progress_bar.update(
-                increment=progress_increment,
-                subtitle=progress_subtitle,
-            )
-            _completed_locus_count[0] = alignment_progress.completed_locus_count
-
-        schema_alignment_analysis = get_schema_alignment_analysis(
-            scheme_path,
-            alignment_strategy=selected_alignment_strategy,
-            progress_output_stream=mafft_progress_output_stream,
-            progress_callback=_update_alignment_progress,
+    if _alignment_requested:
+        selected_alignment_strategy = (
+            alignment_strategy_input.value or default_alignment_strategy
         )
-    return (schema_alignment_analysis,)
+        selected_alignment_strategy_label = alignment_strategy_labels[
+            selected_alignment_strategy
+        ]
+        _completed_locus_count = [0]
+        with mo.status.progress_bar(
+            total=len(locus_statistics),
+            title=(
+                "Preparing nucleotide and amino-acid alignments with "
+                f"{selected_alignment_strategy_label}"
+            ),
+            subtitle="Checking the per-locus cache.",
+            completion_title="Alignment analysis complete",
+            completion_subtitle=(
+                "All current loci have alignment measurements."
+            ),
+            show_rate=True,
+            show_eta=True,
+            remove_on_exit=False,
+        ) as _alignment_progress_bar:
+
+            def _update_alignment_progress(alignment_progress):
+                progress_increment = max(
+                    0,
+                    alignment_progress.completed_locus_count
+                    - _completed_locus_count[0],
+                )
+                if alignment_progress.current_locus_name is None:
+                    progress_subtitle = (
+                        f"Reused {alignment_progress.cached_locus_count:,} "
+                        f"cached loci; "
+                        f"{alignment_progress.total_locus_count - alignment_progress.cached_locus_count:,} "
+                        "require processing."
+                    )
+                else:
+                    progress_rate = (
+                        " at "
+                        f"{alignment_progress.newly_completed_loci_per_second:.2f} "
+                        "loci/s"
+                        if alignment_progress.newly_completed_loci_per_second
+                        is not None
+                        else ""
+                    )
+                    progress_subtitle = (
+                        f"Completed {alignment_progress.current_locus_name}; "
+                        f"{alignment_progress.cached_locus_count:,} loci came "
+                        f"from cache{progress_rate}; elapsed "
+                        f"{alignment_progress.elapsed_seconds:.1f}s."
+                    )
+                _alignment_progress_bar.update(
+                    increment=progress_increment,
+                    subtitle=progress_subtitle,
+                )
+                _completed_locus_count[0] = (
+                    alignment_progress.completed_locus_count
+                )
+
+            scheme_alignment_analysis = get_scheme_alignment_analysis(
+                scheme_path,
+                alignment_strategy=selected_alignment_strategy,
+                maximum_parallel_loci=maximum_worker_count,
+                progress_output_stream=mafft_progress_output_stream,
+                progress_callback=_update_alignment_progress,
+            )
+    else:
+        scheme_alignment_analysis = None
+    return (scheme_alignment_analysis,)
 
 
 @app.cell
 def _(
     amino_acid_gap_warning_threshold_input,
-    calculate_schema_alignment_summary,
-    schema_alignment_analysis,
+    calculate_scheme_alignment_summary,
+    scheme_alignment_analysis,
 ):
     amino_acid_gap_warning_threshold_percentage = float(
         amino_acid_gap_warning_threshold_input.value or 0
     )
-    schema_alignment_summary = calculate_schema_alignment_summary(
-        schema_alignment_analysis,
-        amino_acid_gap_warning_threshold_percentage=(
-            amino_acid_gap_warning_threshold_percentage
-        ),
+    scheme_alignment_summary = (
+        calculate_scheme_alignment_summary(
+            scheme_alignment_analysis,
+            amino_acid_gap_warning_threshold_percentage=(
+                amino_acid_gap_warning_threshold_percentage
+            ),
+        )
+        if scheme_alignment_analysis is not None
+        else None
     )
     return (
         amino_acid_gap_warning_threshold_percentage,
-        schema_alignment_summary,
+        scheme_alignment_summary,
     )
 
 
@@ -1009,9 +1428,13 @@ def _(
     amino_acid_gap_warning_threshold_percentage,
     alignment_strategy_labels,
     mo,
-    schema_alignment_analysis,
-    schema_alignment_summary,
+    scheme_alignment_analysis,
+    scheme_alignment_summary,
 ):
+    mo.stop(
+        scheme_alignment_analysis is None
+        or scheme_alignment_summary is None
+    )
     alignment_information_rows = [
         {
             "Locus": locus_statistics.locus_name,
@@ -1088,7 +1511,7 @@ def _(
             )
             or None,
         }
-        for locus_statistics in schema_alignment_analysis.locus_statistics
+        for locus_statistics in scheme_alignment_analysis.locus_statistics
     ]
     alignment_information_table = mo.ui.table(
         alignment_information_rows,
@@ -1156,34 +1579,33 @@ def _(
         max_columns=None,
         max_height=600,
     )
-    alignment_analysis_displayed = True
     mo.vstack(
         [
             mo.md(
                 f"""
                 ## Alignment Results
 
-                The analysis used **{alignment_strategy_labels[schema_alignment_analysis.alignment_strategy]}**
-                (`{schema_alignment_analysis.alignment_method_identifier}`) with
-                `{schema_alignment_analysis.mafft_version}`.
+                The analysis used **{alignment_strategy_labels[scheme_alignment_analysis.alignment_strategy]}**
+                (`{scheme_alignment_analysis.alignment_method_identifier}`) with
+                `{scheme_alignment_analysis.mafft_version}`.
 
                 **Availability:** nucleotide alignments were calculated for
-                {schema_alignment_summary.nucleotide_aligned_locus_count:,} of
-                {schema_alignment_summary.locus_count:,} loci;
-                {schema_alignment_summary.nucleotide_unavailable_locus_count:,}
+                {scheme_alignment_summary.nucleotide_aligned_locus_count:,} of
+                {scheme_alignment_summary.locus_count:,} loci;
+                {scheme_alignment_summary.nucleotide_unavailable_locus_count:,}
                 had fewer than two eligible sequences and
-                {schema_alignment_summary.nucleotide_failed_locus_count:,} failed.
+                {scheme_alignment_summary.nucleotide_failed_locus_count:,} failed.
                 Amino-acid alignments were calculated for
-                {schema_alignment_summary.amino_acid_aligned_locus_count:,} loci;
-                {schema_alignment_summary.amino_acid_unavailable_locus_count:,}
+                {scheme_alignment_summary.amino_acid_aligned_locus_count:,} loci;
+                {scheme_alignment_summary.amino_acid_unavailable_locus_count:,}
                 were unavailable and
-                {schema_alignment_summary.amino_acid_failed_locus_count:,} failed.
+                {scheme_alignment_summary.amino_acid_failed_locus_count:,} failed.
 
                 **Advisory amino-acid flag:**
-                {schema_alignment_summary.amino_acid_gap_warning_locus_count:,}
-                of {schema_alignment_summary.amino_acid_aligned_locus_count:,}
+                {scheme_alignment_summary.amino_acid_gap_warning_locus_count:,}
+                of {scheme_alignment_summary.amino_acid_aligned_locus_count:,}
                 aligned loci
-                ({schema_alignment_summary.amino_acid_gap_warning_locus_percentage:.2f}%)
+                ({scheme_alignment_summary.amino_acid_gap_warning_locus_percentage:.2f}%)
                 are strictly above the selected threshold. Affected loci can be
                 identified and downloaded from the table. The current advisory
                 threshold is **>{amino_acid_gap_warning_threshold_percentage:.1f}%**.
@@ -1193,107 +1615,135 @@ def _(
         ],
         gap=2,
     )
-    return (alignment_analysis_displayed,)
 
 
 @app.cell(hide_code=True)
-def _(alignment_analysis_displayed, mo):
-    similarity_section_ready = alignment_analysis_displayed
-    mo.md(
-        """
-        ---
-
-        # Cross-locus Sequence Similarity
-
-        This analysis compares one deterministically selected allele
-        **between different loci** at nucleotide and amino-acid level. It is
-        the measurement stage used by the candidate-paralog screen below.
-        Similarity alone does not demonstrate copy number or evolutionary
-        paralogy.
-
-        **Why and how one allele is selected**
-
-        - These schemes do not contain curated `short/` representative
-          directories. The analysis therefore selects directly from each
-          locus FASTA and does not label the chosen allele as a curated or
-          biological representative.
-        - The modal length is calculated from all non-empty alleles. If
-          multiple lengths are equally frequent, the shortest tied length is
-          used. The valid coding allele closest to that length is selected;
-          original FASTA order breaks equal-distance ties.
-        - If a locus has no valid coding allele, its eligible IUPAC DNA allele
-          closest to the same modal length can still be used for the
-          nucleotide comparison. Such a locus has no amino-acid comparison.
-        - This one-selected-allele-per-locus screen is a fast approximation,
-          not a sequence medoid calculation. The later all-alleles cross-locus
-          roadmap item will provide broader, substantially more expensive
-          coverage.
-        - BLAST nucleotide and protein searches run concurrently and divide
-          the CPUs available to the notebook. Results and provenance are
-          cached with the source FASTA signature. The standard `blastn` and
-          `blastp` tasks and their standard low-complexity masking behavior
-          are used with an E-value floor of 0.001.
-        - Identity is calculated within the selected local alignment. Query
-          and subject coverage use their respective aligned coordinate spans;
-          minimum coverage is the smaller of those values.
-        - BSR is directional: `cross-locus raw score / query self score`. Each
-          row therefore has a distinct query and subject, and reciprocal rows
-          may differ. The best raw-score local alignment is retained without
-          merging separate HSPs or clamping BSR values above 1.
-        - Only BLAST-reported local hits are listed. No row means no hit passed
-          the search E-value floor; it does not mean measured zero similarity.
-        - These measurements do not depend on the **Minimum allele length**
-          setting. This raw-result section remains unfiltered; the next
-          section applies configurable literature-derived screening values.
-        """
+def _(mo, static_analysis_ready):
+    run_similarity_analysis_button = mo.ui.run_button(
+        label="Run cross-locus similarity analysis",
+        tooltip="Run or refresh the cached nucleotide and protein BLAST analysis.",
     )
-    return (similarity_section_ready,)
+    mo.vstack(
+        [
+            mo.md(
+                """
+                ---
+
+                # Cross-locus Sequence Similarity
+
+                This analysis compares one deterministically selected allele
+                **between different loci** at nucleotide and amino-acid level.
+                It is the measurement stage used by the candidate-paralog
+                screen below. Similarity alone does not demonstrate copy
+                number or evolutionary paralogy.
+
+                **Why and how one allele is selected**
+
+                - These schemes do not contain curated `short/`
+                  representative directories. The analysis therefore selects
+                  directly from each locus FASTA and does not label the chosen
+                  allele as a curated or biological representative.
+                - The modal length is calculated from all non-empty alleles.
+                  If multiple lengths are equally frequent, the shortest tied
+                  length is used. The valid coding allele closest to that
+                  length is selected; original FASTA order breaks
+                  equal-distance ties.
+                - If a locus has no valid coding allele, its eligible IUPAC
+                  DNA allele closest to the same modal length can still be
+                  used for the nucleotide comparison. Such a locus has no
+                  amino-acid comparison.
+                - This one-selected-allele-per-locus screen is a fast
+                  approximation, not a sequence medoid calculation. The later
+                  all-alleles cross-locus roadmap item will provide broader,
+                  substantially more expensive coverage.
+                - BLAST nucleotide and protein searches run concurrently and
+                  divide the shared **Maximum workers / BLAST threads**
+                  budget. Results and provenance are cached with the source
+                  FASTA signature. The standard `blastn` and `blastp` tasks
+                  and their standard low-complexity masking behavior are used
+                  with an E-value floor of 0.001.
+                - Identity is calculated within the selected local alignment.
+                  Query and subject coverage use their respective aligned
+                  coordinate spans; minimum coverage is the smaller of those
+                  values.
+                - BSR is directional: `cross-locus raw score / query self
+                  score`. Each row therefore has a distinct query and subject,
+                  and reciprocal rows may differ. The best raw-score local
+                  alignment is retained without merging separate HSPs or
+                  clamping BSR values above 1.
+                - Only BLAST-reported local hits are listed. No row means no
+                  hit passed the search E-value floor; it does not mean
+                  measured zero similarity.
+                - These measurements do not depend on the **Minimum allele
+                  length** setting. This raw-result section remains
+                  unfiltered; the next section applies configurable
+                  literature-derived screening values.
+                """
+            ),
+            run_similarity_analysis_button,
+        ],
+        gap=1,
+    )
+    return (run_similarity_analysis_button,)
 
 
 @app.cell
 def _(
-    get_schema_similarity_analysis,
+    get_scheme_similarity_analysis,
+    maximum_worker_count,
     mo,
+    run_complete_evaluation_button,
+    run_similarity_analysis_button,
     scheme_path,
     similarity_progress_output_stream,
-    similarity_section_ready,
 ):
-    _last_similarity_progress_count = [0]
-    with mo.status.progress_bar(
-        total=5,
-        title="Measuring cross-locus nucleotide and amino-acid similarity",
-        subtitle="Checking the versioned BLAST result cache.",
-        completion_title="Cross-locus similarity analysis complete",
-        completion_subtitle="Similarity measurements are ready.",
-        show_rate=False,
-        show_eta=False,
-        remove_on_exit=False,
-    ) as _similarity_progress_bar:
+    _similarity_requested = (
+        run_similarity_analysis_button.value
+        or run_complete_evaluation_button.value
+    )
+    if _similarity_requested:
+        _last_similarity_progress_count = [0]
+        with mo.status.progress_bar(
+            total=5,
+            title=(
+                "Measuring cross-locus nucleotide and amino-acid similarity"
+            ),
+            subtitle="Checking the versioned BLAST result cache.",
+            completion_title="Cross-locus similarity analysis complete",
+            completion_subtitle="Similarity measurements are ready.",
+            show_rate=False,
+            show_eta=False,
+            remove_on_exit=False,
+        ) as _similarity_progress_bar:
 
-        def _update_similarity_progress(similarity_progress):
-            _progress_increment = max(
-                0,
-                similarity_progress.completed_stage_count
-                - _last_similarity_progress_count[0],
-            )
-            _similarity_progress_bar.update(
-                increment=_progress_increment,
-                subtitle=similarity_progress.message,
-            )
-            _last_similarity_progress_count[0] = (
-                similarity_progress.completed_stage_count
-            )
+            def _update_similarity_progress(similarity_progress):
+                _progress_increment = max(
+                    0,
+                    similarity_progress.completed_stage_count
+                    - _last_similarity_progress_count[0],
+                )
+                _similarity_progress_bar.update(
+                    increment=_progress_increment,
+                    subtitle=similarity_progress.message,
+                )
+                _last_similarity_progress_count[0] = (
+                    similarity_progress.completed_stage_count
+                )
 
-        schema_similarity_analysis = get_schema_similarity_analysis(
-            scheme_path,
-            progress_callback=_update_similarity_progress,
-            progress_output_stream=similarity_progress_output_stream,
-        )
-    return (schema_similarity_analysis,)
+            scheme_similarity_analysis = get_scheme_similarity_analysis(
+                scheme_path,
+                maximum_threads=maximum_worker_count,
+                progress_callback=_update_similarity_progress,
+                progress_output_stream=similarity_progress_output_stream,
+            )
+    else:
+        scheme_similarity_analysis = None
+    return (scheme_similarity_analysis,)
 
 
 @app.cell(hide_code=True)
-def _(alt, mo, schema_similarity_analysis):
+def _(alt, mo, scheme_similarity_analysis):
+    mo.stop(scheme_similarity_analysis is None)
     similarity_information_rows = [
         {
             "Locus Pair": (
@@ -1325,7 +1775,7 @@ def _(alt, mo, schema_similarity_analysis):
             "Subject Allele ID": similarity_match.subject_allele_identifier,
             "Subject Strand": similarity_match.nucleotide_subject_strand,
         }
-        for similarity_match in schema_similarity_analysis.matches
+        for similarity_match in scheme_similarity_analysis.matches
     ]
     _maximum_similarity_plot_point_count = 20_000
     _all_similarity_plot_rows = [
@@ -1347,7 +1797,7 @@ def _(alt, mo, schema_similarity_analysis):
                 6,
             ),
         }
-        for similarity_match in schema_similarity_analysis.matches
+        for similarity_match in scheme_similarity_analysis.matches
     ]
     if len(_all_similarity_plot_rows) > _maximum_similarity_plot_point_count:
         _plot_sampling_interval = (
@@ -1482,26 +1932,26 @@ def _(alt, mo, schema_similarity_analysis):
                 ## Cross-locus Similarity Results
 
                 **Selected alleles:** a nucleotide allele was available for
-                {schema_similarity_analysis.nucleotide_selected_locus_count:,}
-                of {schema_similarity_analysis.locus_count:,} loci; a valid
+                {scheme_similarity_analysis.nucleotide_selected_locus_count:,}
+                of {scheme_similarity_analysis.locus_count:,} loci; a valid
                 coding allele and amino-acid translation were available for
-                {schema_similarity_analysis.amino_acid_selected_locus_count:,}.
+                {scheme_similarity_analysis.amino_acid_selected_locus_count:,}.
 
                 **BLAST-reported directed hits:**
-                {schema_similarity_analysis.nucleotide_match_count:,} nucleotide
+                {scheme_similarity_analysis.nucleotide_match_count:,} nucleotide
                 hits from
-                {schema_similarity_analysis.nucleotide_possible_directed_pair_count:,}
+                {scheme_similarity_analysis.nucleotide_possible_directed_pair_count:,}
                 possible selected-allele directed pairs, and
-                {schema_similarity_analysis.amino_acid_match_count:,} amino-acid
+                {scheme_similarity_analysis.amino_acid_match_count:,} amino-acid
                 hits from
-                {schema_similarity_analysis.amino_acid_possible_directed_pair_count:,}
+                {scheme_similarity_analysis.amino_acid_possible_directed_pair_count:,}
                 possible selected-allele directed pairs.
 
-                **Provenance:** `{schema_similarity_analysis.blastn_version}`;
-                `{schema_similarity_analysis.blastp_version}`; E-value floor
-                `{schema_similarity_analysis.blast_evalue:g}`; method
-                `{schema_similarity_analysis.method_identifier}`. Cache reused:
-                **{schema_similarity_analysis.reused_from_cache}**.
+                **Provenance:** `{scheme_similarity_analysis.blastn_version}`;
+                `{scheme_similarity_analysis.blastp_version}`; E-value floor
+                `{scheme_similarity_analysis.blast_evalue:g}`; method
+                `{scheme_similarity_analysis.method_identifier}`. Cache reused:
+                **{scheme_similarity_analysis.reused_from_cache}**.
 
                 The scatter plot displays
                 **{len(similarity_plot_rows):,}** of
@@ -1516,8 +1966,6 @@ def _(alt, mo, schema_similarity_analysis):
         ],
         gap=2,
     )
-    similarity_analysis_displayed = True
-    return (similarity_analysis_displayed,)
 
 
 @app.cell(hide_code=True)
@@ -1527,7 +1975,7 @@ def _(
     default_repeated_homology_nucleotide_identity_threshold_percentage,
     default_same_gene_blast_score_ratio_threshold,
     mo,
-    similarity_analysis_displayed,
+    static_analysis_ready,
 ):
     candidate_amino_acid_identity_threshold_input = mo.ui.number(
         start=0,
@@ -1565,7 +2013,6 @@ def _(
         debounce=True,
         label="Supplementary directional BSR threshold",
     )
-    candidate_paralog_section_ready = similarity_analysis_displayed
     mo.vstack(
         [
             mo.md(
@@ -1614,7 +2061,6 @@ def _(
         candidate_blast_score_ratio_threshold_input,
         candidate_nucleotide_alignment_length_threshold_input,
         candidate_nucleotide_identity_threshold_input,
-        candidate_paralog_section_ready,
     )
 
 
@@ -1625,9 +2071,8 @@ def _(
     candidate_blast_score_ratio_threshold_input,
     candidate_nucleotide_alignment_length_threshold_input,
     candidate_nucleotide_identity_threshold_input,
-    candidate_paralog_section_ready,
     classify_candidate_paralogous_locus_pairs,
-    schema_similarity_analysis,
+    scheme_similarity_analysis,
 ):
     candidate_paralog_thresholds = CandidateParalogThresholds(
         amino_acid_identity_threshold_percentage=float(
@@ -1643,15 +2088,20 @@ def _(
             candidate_blast_score_ratio_threshold_input.value
         ),
     )
-    candidate_paralog_analysis = classify_candidate_paralogous_locus_pairs(
-        schema_similarity_analysis,
-        thresholds=candidate_paralog_thresholds,
+    candidate_paralog_analysis = (
+        classify_candidate_paralogous_locus_pairs(
+            scheme_similarity_analysis,
+            thresholds=candidate_paralog_thresholds,
+        )
+        if scheme_similarity_analysis is not None
+        else None
     )
     return candidate_paralog_analysis, candidate_paralog_thresholds
 
 
 @app.cell(hide_code=True)
 def _(candidate_paralog_analysis, candidate_paralog_thresholds, mo):
+    mo.stop(candidate_paralog_analysis is None)
     candidate_paralog_information_rows = []
     for candidate_pair in candidate_paralog_analysis.candidate_pairs:
         _amino_acid_match = candidate_pair.amino_acid_evidence_match
@@ -1798,7 +2248,6 @@ def _(candidate_paralog_analysis, candidate_paralog_thresholds, mo):
             kind="info",
         )
 
-    candidate_paralog_analysis_displayed = True
     mo.vstack(
         [
             mo.md(
@@ -1838,14 +2287,13 @@ def _(candidate_paralog_analysis, candidate_paralog_thresholds, mo):
         ],
         gap=2,
     )
-    return (candidate_paralog_analysis_displayed,)
 
 
 @app.cell(hide_code=True)
 def _(
-    candidate_paralog_analysis_displayed,
     default_representative_bsr_threshold,
     mo,
+    static_analysis_ready,
 ):
     representative_bsr_threshold_input = mo.ui.number(
         start=0,
@@ -1854,7 +2302,10 @@ def _(
         debounce=True,
         label="Representative-to-allele BSR threshold",
     )
-    representative_bsr_section_ready = candidate_paralog_analysis_displayed
+    run_representative_bsr_analysis_button = mo.ui.run_button(
+        label="Run representative BSR analysis",
+        tooltip="Run or refresh the cached representative-to-allele BLASTp analysis.",
+    )
     mo.vstack(
         [
             mo.md(
@@ -1895,74 +2346,96 @@ def _(
                   groups. These are **high-BSR similarity groups**, not
                   confirmed paralogs. Copy number and evolutionary paralogy
                   require genome-level evidence.
-                - BLASTp uses the CPUs available to the notebook. Raw BSR
-                  measurements are cached, so changing this threshold only
-                  reclassifies existing values. The analysis is independent
-                  of the **Minimum allele length** setting.
+                - BLASTp uses the shared **Maximum workers / BLAST threads**
+                  budget. Raw BSR measurements are cached, so changing this
+                  threshold only reclassifies existing values. The analysis
+                  is independent of the **Minimum allele length** setting.
                 """
             ),
             representative_bsr_threshold_input,
+            run_representative_bsr_analysis_button,
         ],
         gap=1,
     )
-    return representative_bsr_section_ready, representative_bsr_threshold_input
+    return (
+        representative_bsr_threshold_input,
+        run_representative_bsr_analysis_button,
+    )
 
 
 @app.cell
 def _(
-    get_schema_representative_bsr_analysis,
+    get_scheme_representative_bsr_analysis,
+    maximum_worker_count,
     mo,
     representative_bsr_progress_output_stream,
-    representative_bsr_section_ready,
+    run_complete_evaluation_button,
+    run_representative_bsr_analysis_button,
     scheme_path,
 ):
-    _last_representative_bsr_progress_count = [0]
-    with mo.status.progress_bar(
-        total=5,
-        title="Measuring representative-versus-allele protein BSR",
-        subtitle="Checking the versioned representative BSR cache.",
-        completion_title="Representative BSR analysis complete",
-        completion_subtitle="Coverage and high-BSR groups are ready.",
-        show_rate=False,
-        show_eta=False,
-        remove_on_exit=False,
-    ) as _representative_bsr_progress_bar:
+    _representative_bsr_requested = (
+        run_representative_bsr_analysis_button.value
+        or run_complete_evaluation_button.value
+    )
+    if _representative_bsr_requested:
+        _last_representative_bsr_progress_count = [0]
+        with mo.status.progress_bar(
+            total=5,
+            title="Measuring representative-versus-allele protein BSR",
+            subtitle="Checking the versioned representative BSR cache.",
+            completion_title="Representative BSR analysis complete",
+            completion_subtitle="Coverage and high-BSR groups are ready.",
+            show_rate=False,
+            show_eta=False,
+            remove_on_exit=False,
+        ) as _representative_bsr_progress_bar:
 
-        def _update_representative_bsr_progress(representative_bsr_progress):
-            _progress_increment = max(
-                0,
-                representative_bsr_progress.completed_stage_count
-                - _last_representative_bsr_progress_count[0],
-            )
-            _representative_bsr_progress_bar.update(
-                increment=_progress_increment,
-                subtitle=representative_bsr_progress.message,
-            )
-            _last_representative_bsr_progress_count[0] = (
-                representative_bsr_progress.completed_stage_count
-            )
+            def _update_representative_bsr_progress(
+                representative_bsr_progress,
+            ):
+                _progress_increment = max(
+                    0,
+                    representative_bsr_progress.completed_stage_count
+                    - _last_representative_bsr_progress_count[0],
+                )
+                _representative_bsr_progress_bar.update(
+                    increment=_progress_increment,
+                    subtitle=representative_bsr_progress.message,
+                )
+                _last_representative_bsr_progress_count[0] = (
+                    representative_bsr_progress.completed_stage_count
+                )
 
-        schema_representative_bsr_analysis = (
-            get_schema_representative_bsr_analysis(
-                scheme_path,
-                progress_callback=_update_representative_bsr_progress,
-                progress_output_stream=representative_bsr_progress_output_stream,
+            scheme_representative_bsr_analysis = (
+                get_scheme_representative_bsr_analysis(
+                    scheme_path,
+                    maximum_threads=maximum_worker_count,
+                    progress_callback=_update_representative_bsr_progress,
+                    progress_output_stream=(
+                        representative_bsr_progress_output_stream
+                    ),
+                )
             )
-        )
-    return (schema_representative_bsr_analysis,)
+    else:
+        scheme_representative_bsr_analysis = None
+    return (scheme_representative_bsr_analysis,)
 
 
 @app.cell
 def _(
     classify_representative_bsr_analysis,
     representative_bsr_threshold_input,
-    schema_representative_bsr_analysis,
+    scheme_representative_bsr_analysis,
 ):
-    representative_bsr_classification = classify_representative_bsr_analysis(
-        schema_representative_bsr_analysis,
-        blast_score_ratio_threshold=float(
-            representative_bsr_threshold_input.value
-        ),
+    representative_bsr_classification = (
+        classify_representative_bsr_analysis(
+            scheme_representative_bsr_analysis,
+            blast_score_ratio_threshold=float(
+                representative_bsr_threshold_input.value
+            ),
+        )
+        if scheme_representative_bsr_analysis is not None
+        else None
     )
     return (representative_bsr_classification,)
 
@@ -1971,8 +2444,12 @@ def _(
 def _(
     mo,
     representative_bsr_classification,
-    schema_representative_bsr_analysis,
+    scheme_representative_bsr_analysis,
 ):
+    mo.stop(
+        scheme_representative_bsr_analysis is None
+        or representative_bsr_classification is None
+    )
     _maximum_locus_preview_count = 2_000
     _maximum_pair_preview_count = 1_000
     _maximum_group_member_preview_count = 25
@@ -2188,7 +2665,6 @@ def _(
         is not None
         else "unavailable"
     )
-    representative_bsr_analysis_displayed = True
     mo.vstack(
         [
             mo.md(
@@ -2197,13 +2673,13 @@ def _(
 
                 **Availability:** an approximate representative was selected
                 for
-                **{schema_representative_bsr_analysis.representative_locus_count:,}**
-                of **{schema_representative_bsr_analysis.locus_count:,}** loci;
-                **{schema_representative_bsr_analysis.self_score_locus_count:,}**
+                **{scheme_representative_bsr_analysis.representative_locus_count:,}**
+                of **{scheme_representative_bsr_analysis.locus_count:,}** loci;
+                **{scheme_representative_bsr_analysis.self_score_locus_count:,}**
                 had a usable BLASTp self score. The protein analysis evaluated
-                **{schema_representative_bsr_analysis.valid_translated_allele_count:,}**
+                **{scheme_representative_bsr_analysis.valid_translated_allele_count:,}**
                 valid alleles from
-                **{schema_representative_bsr_analysis.total_allele_count:,}**
+                **{scheme_representative_bsr_analysis.total_allele_count:,}**
                 total records.
 
                 **Within-locus coverage:**
@@ -2229,12 +2705,12 @@ def _(
                 similarity results, not confirmed paralogy.
 
                 **Provenance:**
-                `{schema_representative_bsr_analysis.blastp_version}`;
+                `{scheme_representative_bsr_analysis.blastp_version}`;
                 E-value floor
-                `{schema_representative_bsr_analysis.blast_evalue:g}`; method
-                `{schema_representative_bsr_analysis.method_identifier}`.
+                `{scheme_representative_bsr_analysis.blast_evalue:g}`; method
+                `{scheme_representative_bsr_analysis.method_identifier}`.
                 Cache reused:
-                **{schema_representative_bsr_analysis.reused_from_cache}**.
+                **{scheme_representative_bsr_analysis.reused_from_cache}**.
 
                 The locus table displays
                 **{len(representative_bsr_locus_rows):,}** of
@@ -2255,11 +2731,10 @@ def _(
         ],
         gap=2,
     )
-    return (representative_bsr_analysis_displayed,)
 
 
 @app.cell
-def _(mo, representative_bsr_analysis_displayed):
+def _(mo, static_analysis_ready):
     clear_cache_button = mo.ui.run_button(
         kind="danger",
         label="Clear scheme cache",
@@ -2279,10 +2754,16 @@ def _(mo, representative_bsr_analysis_displayed):
 
 
 @app.cell
-def _(clear_cache, clear_cache_button, mo, set_schema_reset):
+def _(
+    clear_cache,
+    clear_cache_button,
+    mo,
+    scheme_cache_root_directory_path,
+    set_scheme_reset,
+):
     if clear_cache_button.value:
-        clear_cache()
-        set_schema_reset(lambda value: value + 1)
+        clear_cache(scheme_cache_root_directory_path)
+        set_scheme_reset(lambda value: value + 1)
         _ = mo.status.toast(
             "Scheme cache cleared",
             "The archive selection was reset.",

@@ -1,0 +1,39 @@
+# Copy this file to a stable dataset-specific filename before filling it in.
+# TODO values and an empty genomes array are intentionally not analysis-ready.
+# Unknown optional provenance should be recorded as "unknown" and explained in
+# notes rather than guessed.
+
+schema_version = 1
+dataset_id = "TODO: stable dataset identifier"
+title = "TODO: human-readable representative genome set title"
+description = "TODO: selection scope, purpose, and intended use"
+scheme_id = "TODO: matching scheme_id from metadata/scheme_sources.toml"
+created_date = "TODO: YYYY-MM-DD"
+dataset_version = "TODO: version or snapshot identifier"
+provenance_status = "incomplete"
+
+# Add one table per assembly. Version assembly accessions where possible.
+# `local_path` is relative to this manifest file, or absolute when runtime data
+# are managed elsewhere. Do not commit assemblies unless their redistribution
+# terms permit it. Quality fields may be omitted when genuinely unavailable.
+#
+# [[genomes]]
+# genome_id = "example-genome-1"
+# scientific_name = "Genus species"
+# taxonomy_identifier = "NCBITaxon:12345"
+# assembly_accession = "GCF_000000000.1"
+# source_url = "https://..."
+# retrieved_date = "YYYY-MM-DD"
+# local_path = "../../data/genomes/example-genome-1.fna.gz"
+# sha256 = "64-character hexadecimal digest"
+# assembly_level = "Complete Genome"
+# contig_count = 1
+# total_length_bp = 0
+# n50_bp = 0
+# completeness_percentage = 0.0
+# contamination_percentage = 0.0
+# lineage = "TODO or unknown with explanation"
+# inclusion_rationale = "Why this genome represents the evaluation scope"
+# source_license = "Source terms or unknown"
+# source_citation = "DOI, PMID, or recommended citation"
+# notes = "Additional provenance, transformations, or limitations"

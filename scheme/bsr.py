@@ -1,4 +1,4 @@
-"""Measure representative-to-allele protein BSR coverage for a schema.
+"""Measure representative-to-allele protein BSR coverage for a scheme.
 
 This module implements the protein-level representative validation used by
 Schema Refinery without requiring a curated ``short/`` directory.  The current
@@ -21,7 +21,7 @@ match for each locus pair, collapsed into unordered pairs, and connected into
 high-BSR similarity groups.  These groups are sequence-similarity observations,
 not confirmation of copy number or evolutionary paralogy.
 
-Results are cached atomically inside the extracted schema using a FASTA source
+Results are cached atomically inside the extracted scheme using a FASTA source
 signature, BLASTp version, selection method, and E-value.  Changing the display
 threshold reclassifies cached measurements without rerunning BLAST or rereading
 the FASTA files.  The public API is independent of Marimo and includes progress
@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .allele_info import _translate_valid_allele
+from .resources import resolve_worker_count
 from .similarity import (
     DEFAULT_BLAST_EVALUE,
     DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD,
@@ -48,14 +49,20 @@ from .similarity import (
     _is_valid_coding_sequence,
     _locus_name_from_file_path,
     _read_fasta_records,
-    _resolve_maximum_threads,
-    _resolve_schema_directory_path,
+    _resolve_scheme_directory_path,
     _run_command,
     _select_allele_closest_to_modal_length,
 )
 
-SCHEMA_REPRESENTATIVE_BSR_CACHE_FILENAME = ".schema-representative-bsr-cache.json"
-SCHEMA_REPRESENTATIVE_BSR_CACHE_VERSION = 1
+SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME = ".scheme-representative-bsr-cache.json"
+LEGACY_REPRESENTATIVE_BSR_CACHE_FILENAME = (
+    ".schema-representative-bsr-cache.json"
+)
+SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAMES = (
+    SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME,
+    LEGACY_REPRESENTATIVE_BSR_CACHE_FILENAME,
+)
+SCHEME_REPRESENTATIVE_BSR_CACHE_VERSION = 1
 REPRESENTATIVE_BSR_METHOD_IDENTIFIER = (
     "blastp-modal-length-representative-vs-valid-alleles-bsr-v1"
 )
@@ -66,8 +73,9 @@ __all__ = [
     "DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD",
     "REPRESENTATIVE_BSR_METHOD_IDENTIFIER",
     "REPRESENTATIVE_BSR_PROGRESS_STAGE_COUNT",
-    "SCHEMA_REPRESENTATIVE_BSR_CACHE_FILENAME",
-    "SCHEMA_REPRESENTATIVE_BSR_CACHE_VERSION",
+    "SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME",
+    "SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAMES",
+    "SCHEME_REPRESENTATIVE_BSR_CACHE_VERSION",
     "AlleleBlastScoreRatio",
     "HighBsrLocusGroup",
     "HighBsrLocusPair",
@@ -76,9 +84,9 @@ __all__ = [
     "LocusRepresentativeBsrMeasurements",
     "RepresentativeBsrClassification",
     "RepresentativeBsrProgress",
-    "SchemaRepresentativeBsrAnalysis",
+    "SchemeRepresentativeBsrAnalysis",
     "classify_representative_bsr_analysis",
-    "get_schema_representative_bsr_analysis",
+    "get_scheme_representative_bsr_analysis",
 ]
 
 type _SourceSignature = tuple[tuple[str, int, int], ...]
@@ -127,7 +135,7 @@ class InterLocusBlastScoreRatio:
 
 
 @dataclass(frozen=True)
-class SchemaRepresentativeBsrAnalysis:
+class SchemeRepresentativeBsrAnalysis:
     """Complete threshold-independent representative BSR analysis."""
 
     locus_measurements: tuple[LocusRepresentativeBsrMeasurements, ...]
@@ -308,7 +316,7 @@ class _CollectedLocus:
 
 
 def _collect_protein_alleles(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     fasta_file_paths: tuple[Path, ...],
 ) -> tuple[tuple[_CollectedLocus, ...], tuple[_ProteinAllele, ...]]:
     """Translate valid alleles and select one approximate representative."""
@@ -317,7 +325,7 @@ def _collect_protein_alleles(
     allele_index = 0
     for fasta_file_path in fasta_file_paths:
         locus_name = _locus_name_from_file_path(
-            schema_directory_path,
+            scheme_directory_path,
             fasta_file_path,
         )
         fasta_records = _read_fasta_records(fasta_file_path)
@@ -707,7 +715,7 @@ def _create_high_bsr_groups(
 
 
 def classify_representative_bsr_analysis(
-    analysis: SchemaRepresentativeBsrAnalysis,
+    analysis: SchemeRepresentativeBsrAnalysis,
     *,
     blast_score_ratio_threshold: float = (
         DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD
@@ -859,20 +867,25 @@ def _deserialize_inter_locus_measurement(
 
 def _read_cached_analysis(
     *,
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     source_signature: _SourceSignature,
     blastp_version: str | None,
     blast_evalue: float,
-) -> SchemaRepresentativeBsrAnalysis | None:
+) -> SchemeRepresentativeBsrAnalysis | None:
     """Return a compatible cached analysis, or ``None`` when unavailable."""
-    cache_file_path = (
-        schema_directory_path / SCHEMA_REPRESENTATIVE_BSR_CACHE_FILENAME
+    cache_file_path = next(
+        (
+            scheme_directory_path / cache_filename
+            for cache_filename in SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAMES
+            if (scheme_directory_path / cache_filename).is_file()
+        ),
+        scheme_directory_path / SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME,
     )
     try:
         cache_data = json.loads(cache_file_path.read_text(encoding="utf-8"))
         if (
             int(cache_data["cache_version"])
-            != SCHEMA_REPRESENTATIVE_BSR_CACHE_VERSION
+            != SCHEME_REPRESENTATIVE_BSR_CACHE_VERSION
         ):
             return None
         if (
@@ -893,7 +906,7 @@ def _read_cached_analysis(
         )
         if cached_source_signature != source_signature:
             return None
-        return SchemaRepresentativeBsrAnalysis(
+        return SchemeRepresentativeBsrAnalysis(
             locus_measurements=tuple(
                 _deserialize_locus_measurements(locus_data)
                 for locus_data in cache_data["locus_measurements"]
@@ -913,13 +926,13 @@ def _read_cached_analysis(
 
 def _write_cached_analysis(
     *,
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     source_signature: _SourceSignature,
-    analysis: SchemaRepresentativeBsrAnalysis,
+    analysis: SchemeRepresentativeBsrAnalysis,
 ) -> None:
-    """Atomically write the raw BSR analysis when the schema is writable."""
+    """Atomically write the raw BSR analysis when the scheme is writable."""
     cache_data = {
-        "cache_version": SCHEMA_REPRESENTATIVE_BSR_CACHE_VERSION,
+        "cache_version": SCHEME_REPRESENTATIVE_BSR_CACHE_VERSION,
         "method_identifier": analysis.method_identifier,
         "blastp_version": analysis.blastp_version,
         "blast_evalue": analysis.blast_evalue,
@@ -937,15 +950,15 @@ def _write_cached_analysis(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=schema_directory_path,
-            prefix=f"{SCHEMA_REPRESENTATIVE_BSR_CACHE_FILENAME}.",
+            dir=scheme_directory_path,
+            prefix=f"{SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME}.",
             suffix=".tmp",
             delete=False,
         ) as temporary_cache_file:
             json.dump(cache_data, temporary_cache_file, separators=(",", ":"))
             temporary_cache_file_path = Path(temporary_cache_file.name)
         temporary_cache_file_path.replace(
-            schema_directory_path / SCHEMA_REPRESENTATIVE_BSR_CACHE_FILENAME
+            scheme_directory_path / SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME
         )
     except OSError:
         if temporary_cache_file_path is not None:
@@ -970,8 +983,8 @@ def _emit_progress(
         )
 
 
-def get_schema_representative_bsr_analysis(
-    schema_directory_path: str | Path,
+def get_scheme_representative_bsr_analysis(
+    scheme_directory_path: str | Path,
     *,
     maximum_threads: int | None = None,
     blast_evalue: float = DEFAULT_BLAST_EVALUE,
@@ -979,14 +992,15 @@ def get_schema_representative_bsr_analysis(
     makeblastdb_executable: str = "makeblastdb",
     progress_callback: RepresentativeBsrProgressCallback | None = None,
     progress_output_stream: TextIO | None = None,
-) -> SchemaRepresentativeBsrAnalysis:
+) -> SchemeRepresentativeBsrAnalysis:
     """Measure representative-to-all-valid-allele protein BSR values.
 
     Args:
-        schema_directory_path: Extracted schema directory containing locus
+        scheme_directory_path: Extracted scheme directory containing locus
             FASTA files.
-        maximum_threads: BLASTp thread budget; defaults to every logical CPU
-            available to the process.
+        maximum_threads: BLASTp thread budget. The default uses 80% of CPUs
+            available to the process, rounded down to an even count when
+            possible.
         blast_evalue: BLASTp reporting floor.  It controls search sensitivity,
             not BSR classification.
         blastp_executable: ``blastp`` executable name or path.
@@ -1000,21 +1014,21 @@ def get_schema_representative_bsr_analysis(
     """
     if not isfinite(blast_evalue) or blast_evalue <= 0:
         raise ValueError("blast_evalue must be greater than zero")
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
     fasta_file_paths = _find_all_fasta_file_paths(
-        resolved_schema_directory_path
+        resolved_scheme_directory_path
     )
     source_signature = _create_source_signature(
-        resolved_schema_directory_path,
+        resolved_scheme_directory_path,
         fasta_file_paths,
     )
     try:
         blastp_version = _get_blast_version(blastp_executable)
     except RuntimeError:
         cached_analysis_without_blast = _read_cached_analysis(
-            schema_directory_path=resolved_schema_directory_path,
+            scheme_directory_path=resolved_scheme_directory_path,
             source_signature=source_signature,
             blastp_version=None,
             blast_evalue=blast_evalue,
@@ -1038,7 +1052,7 @@ def get_schema_representative_bsr_analysis(
         return cached_analysis_without_blast
 
     cached_analysis = _read_cached_analysis(
-        schema_directory_path=resolved_schema_directory_path,
+        scheme_directory_path=resolved_scheme_directory_path,
         source_signature=source_signature,
         blastp_version=blastp_version,
         blast_evalue=blast_evalue,
@@ -1058,7 +1072,7 @@ def get_schema_representative_bsr_analysis(
         return cached_analysis
 
     collected_loci, all_protein_alleles = _collect_protein_alleles(
-        resolved_schema_directory_path,
+        resolved_scheme_directory_path,
         fasta_file_paths,
     )
     representative_count = sum(
@@ -1089,7 +1103,7 @@ def get_schema_representative_bsr_analysis(
         progress_callback=progress_callback,
         progress_output_stream=progress_output_stream,
     )
-    with tempfile.TemporaryDirectory(prefix="schema-representative-bsr-") as directory:
+    with tempfile.TemporaryDirectory(prefix="scheme-representative-bsr-") as directory:
         locus_measurements, inter_locus_measurements = _run_blastp_analysis(
             collected_loci=collected_loci,
             all_protein_alleles=all_protein_alleles,
@@ -1097,7 +1111,7 @@ def get_schema_representative_bsr_analysis(
             blastp_executable=blastp_executable,
             makeblastdb_executable=makeblastdb_executable,
             blast_evalue=blast_evalue,
-            thread_count=_resolve_maximum_threads(maximum_threads),
+            thread_count=resolve_worker_count(maximum_threads),
         )
     _emit_progress(
         RepresentativeBsrProgress(
@@ -1122,7 +1136,7 @@ def get_schema_representative_bsr_analysis(
         progress_callback=progress_callback,
         progress_output_stream=progress_output_stream,
     )
-    analysis = SchemaRepresentativeBsrAnalysis(
+    analysis = SchemeRepresentativeBsrAnalysis(
         locus_measurements=locus_measurements,
         inter_locus_measurements=inter_locus_measurements,
         blastp_version=blastp_version,
@@ -1131,7 +1145,7 @@ def get_schema_representative_bsr_analysis(
         reused_from_cache=False,
     )
     _write_cached_analysis(
-        schema_directory_path=resolved_schema_directory_path,
+        scheme_directory_path=resolved_scheme_directory_path,
         source_signature=source_signature,
         analysis=analysis,
     )
@@ -1168,9 +1182,9 @@ def main() -> None:
     """Run representative BSR coverage analysis from the command line."""
     argument_parser = argparse.ArgumentParser(description=__doc__)
     argument_parser.add_argument(
-        "schema_directory",
+        "scheme_directory",
         type=Path,
-        help="Extracted schema directory to analyze.",
+        help="Extracted scheme directory to analyze.",
     )
     argument_parser.add_argument(
         "--bsr",
@@ -1182,7 +1196,10 @@ def main() -> None:
         "--threads",
         type=_parse_positive_integer,
         default=None,
-        help="BLASTp thread budget (default: all available CPUs).",
+        help=(
+            "BLASTp thread budget (default: 80%% of available CPUs, rounded "
+            "down to an even count when possible)."
+        ),
     )
     argument_parser.add_argument(
         "--json",
@@ -1190,8 +1207,8 @@ def main() -> None:
         help="Emit the complete raw analysis and classified result as JSON.",
     )
     parsed_arguments = argument_parser.parse_args()
-    analysis = get_schema_representative_bsr_analysis(
-        parsed_arguments.schema_directory,
+    analysis = get_scheme_representative_bsr_analysis(
+        parsed_arguments.scheme_directory,
         maximum_threads=parsed_arguments.threads,
         progress_output_stream=sys.stderr,
     )

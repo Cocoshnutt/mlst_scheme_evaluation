@@ -26,14 +26,17 @@ validation of newly developed schemes.
   scheme collection.
 - Scheme-wide and per-locus allele counts, length distributions, modal-length
   outliers and coding-sequence integrity checks.
-- Interactive summary statistics, charts, and a searchable per-locus table in
-  the Marimo application.
+- A progressive scheme-wide overview, interactive summary statistics, charts,
+  and a searchable per-locus table in the Marimo application.
 - Cached nucleotide and protein MAFFT analyses for alignment-gap statistics and
   nucleotide polymorphic-site measurements.
 - Cached inter-locus BLAST analyses reporting nucleotide and protein identity,
   coverage, and BLAST Score Ratio measurements.
 - Cached representative-to-allele protein BSR coverage and inter-locus
   high-BSR similarity groups.
+- A separate Phase 2 functional-performance notebook foundation with a typed,
+  machine-readable representative-genome manifest and explicit readiness
+  validation.
 
 Genome-based functional evaluation, cross-organism validation, standardized
 screening flags, and the final reporting deliverables remain planned work; see
@@ -85,11 +88,48 @@ lock file and run the evaluation application:
 
 ```console
 uv sync --locked
-uv run --locked marimo run notebook.py
+uv run --locked marimo run notebooks/intrinsic.py
 ```
 
 `marimo run` serves the evaluation as an application without exposing the
 notebook editor.
+
+The genome-dependent Phase 2 readiness notebook is a separate application:
+
+```console
+uv run --locked marimo run notebooks/functional.py
+```
+
+It currently validates manifests from `metadata/genome_sets/` and identifies
+missing inputs. It does not yet run typing tools or calculate functional
+performance metrics. Complete a dataset-specific copy of
+`metadata/genome_sets/template.toml` before implementing those calculations;
+see [`docs/functional-workflow.md`](docs/functional-workflow.md). Developer
+steps for extending either phase are in
+[`docs/adding-an-analysis.md`](docs/adding-an-analysis.md).
+
+After selecting a scheme, static summary, locus-statistics, and allele-table
+results load automatically. MAFFT and BLAST analyses run only when requested
+with their section controls. A single **Run complete intrinsic evaluation**
+control requests all currently implemented expensive intrinsic analyses, and
+compatible cached results are reused. The overview at the beginning updates
+progressively as requested stages finish; pending overview sections do not
+trigger computation.
+
+The expensive-analysis panel also provides one shared worker budget for MAFFT,
+BLASTn, and BLASTp. Its default is 80% of the logical CPUs available to the
+Marimo process, rounded down to an even number when possible and never below
+one. This leaves some capacity for the operating system and behaves safely on
+small or CPU-constrained machines. The control can be reduced for shared or
+memory-limited systems, or increased to all process-visible CPUs when maximum
+throughput is appropriate.
+
+The command-line interfaces use the same default. Pass `--workers COUNT` to
+`scheme.alignment` or `--threads COUNT` to `scheme.similarity` and `scheme.bsr`
+for an explicit positive override. Explicit CLI and library values are not
+silently capped. Worker counts affect scheduling only, so they are deliberately
+excluded from scientific cache keys and changing them reuses compatible
+results.
 
 uv automatically obtains a compatible Python 3.14 interpreter when one is not
 already installed. `uv sync --locked` creates `.venv` and installs the exact
@@ -110,7 +150,7 @@ the exact versions exported from `uv.lock`:
 ```console
 conda env create --file environment.yml
 conda activate mlst-scheme-evaluation
-marimo run notebook.py
+marimo run notebooks/intrinsic.py
 ```
 
 After pulling dependency changes, update an existing environment with:
@@ -144,7 +184,7 @@ activates it:
 
 ```console
 devenv shell
-marimo run notebook.py
+marimo run notebooks/intrinsic.py
 ```
 
 Nix is not required when the setup in the previous section is used.
@@ -163,63 +203,74 @@ warning that it cannot collect GPU statistics. It is harmless. To suppress
 that upstream warning when desired, start marimo with:
 
 ```console
-uv run --locked marimo --log-level error run notebook.py
+uv run --locked marimo --log-level error run notebooks/intrinsic.py
 ```
 
 Cache and extract a scheme archive from a notebook cell with:
 
 ```python
-from schema.cache import cache_archive, clear_cache
-from schema.info import get_schema_information
+from scheme.cache import cache_archive, clear_cache
+from scheme.info import get_scheme_information
 
 scheme_directory = cache_archive("archive/mlst/corynebacterium.tar.zst")
-schema_information = get_schema_information(
+scheme_information = get_scheme_information(
     scheme_directory,
     minimum_sequence_length=300,
 )
 ```
 
 Calling `cache_archive` again reuses the extracted directory. Call
-`clear_cache()` to remove all cached schemes. Schema statistics and allele
-lengths are cached inside each extracted schema, so repeated evaluations and
+`clear_cache()` to remove all cached schemes. Scheme statistics and allele
+lengths are cached inside each extracted scheme, so repeated evaluations and
 new minimum-length thresholds do not reread the FASTA files. Clearing the
 scheme cache also clears these calculated results.
 
-The schema information module can also be used from the command line:
+On a cold evaluation, scheme information, locus statistics, and per-locus
+allele information now come from one source-signature-aware static analysis.
+The existing APIs and compatibility cache formats remain available, while the
+shared traversal avoids validating and summarizing every FASTA record three
+times. The measurement and migration rationale are documented in
+[`docs/static-analysis-cache.md`](docs/static-analysis-cache.md).
+
+Analysis cache filenames now use the official `scheme` terminology. Existing
+`.schema-*-cache.json` files remain readable, while newly calculated results
+are written as `.scheme-*-cache.json` files.
+
+The scheme information module can also be used from the command line:
 
 ```console
-uv run --locked python -m schema.info PATH_TO_EXTRACTED_SCHEMA
-uv run --locked python -m schema.info PATH_TO_EXTRACTED_SCHEMA --ml 300 --json
+uv run --locked python -m scheme.info PATH_TO_EXTRACTED_SCHEME
+uv run --locked python -m scheme.info PATH_TO_EXTRACTED_SCHEME --ml 300 --json
 ```
 
 The standard output includes scheme-wide counts and percentages for alleles
 below 80% and above 120% of their respective locus's modal length.
 
-Selecting a scheme in `notebook.py` displays four locus-statistics panels in a
-clearly separated section beneath the scheme summary. `schema/stats.py`
-provides the reusable calculations and Altair chart construction. Its results
-are cached inside the extracted scheme.
+Selecting a scheme in `notebooks/intrinsic.py` displays four locus-statistics
+panels in a clearly separated section beneath the scheme summary.
+`scheme/stats.py` provides the reusable calculations and Altair chart
+construction. Its results are cached inside the extracted scheme.
 
 The notebook also displays a searchable, paginated allele-analysis table built
-by `schema/allele_info.py`. The table follows the chewBBACA per-locus fields and
+by `scheme/allele_info.py`. The table follows the chewBBACA per-locus fields and
 reuses cached static metrics when the minimum allele length changes. The module
 can also emit the table data as JSON:
 
 ```console
-uv run --locked python -m schema.allele_info PATH_TO_EXTRACTED_SCHEMA --ml 201
+uv run --locked python -m scheme.allele_info PATH_TO_EXTRACTED_SCHEME --ml 201
 ```
 
 The remaining command-line modules retain their interfaces through the
 package entry points:
 
 ```console
-uv run --locked python -m schema.cache --help
-uv run --locked python -m schema.alignment --help
-uv run --locked python -m schema.bsr --help
-uv run --locked python -m schema.similarity --help
+uv run --locked python -m scheme.cache --help
+uv run --locked python -m scheme.alignment --help
+uv run --locked python -m scheme.bsr --help
+uv run --locked python -m scheme.similarity --help
 ```
 
-`schema.stats` remains a library-only chart and statistics module.
+`scheme.stats` remains a library-only chart and statistics module.
 
 ## TODO: scheme evaluation roadmap
 
@@ -277,8 +328,17 @@ thresholds.
 
 ### Phase 2 — functional scheme performance (genomes required)
 
+Implemented foundation:
+
+- [x] Keep Phase 2 in `notebooks/functional.py`, separate from the intrinsic
+  notebook while sharing stable repository conventions.
+- [x] Define a typed representative-genome manifest, machine-readable JSON
+  Schema, template, SHA-256 identity, and readiness validation.
+- [x] Document independent cache boundaries, missing-value requirements, and
+  FAIR result-artifact expectations.
+
 - [ ] Define representative genome manifests and record assembly quality and
-  lineage metadata.
+  lineage metadata for the real evaluation collections.
 - [ ] Calculate core-locus prevalence per locus. Offer the literature-used 95%
   prevalence value as an optional reference, clearly distinguished from
   recovering 95% of loci in one genome.
@@ -331,6 +391,18 @@ thresholds.
 - [ ] Produce a versioned, standardized evaluation checklist that records each
   criterion, its required inputs, calculation, literature basis, and intended
   interpretation.
+- [ ] Complete every pending field in `metadata/scheme_sources.toml` after the
+  refactor and before publishing a release or research output.
 - [ ] Document the evaluation methodologies and findings in the final report.
 - [ ] Prepare a draft validation report covering cross-organism and
   typing-pipeline validation.
+
+## License
+
+The software and project documentation are licensed under the European Union
+Public Licence, version 1.2 (`EUPL-1.2`). See [LICENSE](LICENSE).
+
+The scheme archives under `archive/` originate from external data providers and
+are not relicensed by this project. Their source, licensing, and transformation
+details must be recorded separately in `metadata/scheme_sources.toml` before a
+release or research output is published.

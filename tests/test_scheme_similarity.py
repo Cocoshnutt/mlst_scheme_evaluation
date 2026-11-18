@@ -6,14 +6,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from schema import similarity
-from schema.similarity import (
-    SCHEMA_SIMILARITY_CACHE_FILENAME,
+from scheme import similarity
+from scheme.similarity import (
+    SCHEME_SIMILARITY_CACHE_FILENAME,
+    SCHEME_SIMILARITY_CACHE_FILENAMES,
     SEQUENCE_LEVEL_AMINO_ACID,
     SEQUENCE_LEVEL_NUCLEOTIDE,
     CandidateParalogThresholds,
     CrossLocusSimilarityMatch,
-    SchemaSimilarityAnalysis,
+    SchemeSimilarityAnalysis,
     _BlastHsp,
     _collect_selected_allele_sequences,
     _create_similarity_matches,
@@ -21,7 +22,7 @@ from schema.similarity import (
     _SelectedAlleleSequence,
     _SimilarityLevelResult,
     classify_candidate_paralogous_locus_pairs,
-    get_schema_similarity_analysis,
+    get_scheme_similarity_analysis,
 )
 
 
@@ -31,8 +32,8 @@ class SelectedAlleleTest(unittest.TestCase):
     def test_valid_allele_closest_to_modal_length_is_selected(self) -> None:
         """Prefer a valid modal-length allele over an earlier length outlier."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "gene_a.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "gene_a.fasta").write_text(
                 ">gene_a_1\nATGAAAAAATAA\n"
                 ">gene_a_2\nATGCCCTAA\n"
                 ">gene_a_3\nATGGGGTAA\n",
@@ -44,8 +45,8 @@ class SelectedAlleleTest(unittest.TestCase):
                 selected_amino_acid_alleles,
                 locus_count,
             ) = _collect_selected_allele_sequences(
-                schema_directory_path,
-                _find_all_fasta_file_paths(schema_directory_path),
+                scheme_directory_path,
+                _find_all_fasta_file_paths(scheme_directory_path),
             )
 
         self.assertEqual(locus_count, 1)
@@ -58,8 +59,8 @@ class SelectedAlleleTest(unittest.TestCase):
     def test_shortest_tied_modal_length_and_fasta_order_break_ties(self) -> None:
         """Use the shortest tied mode, then retain FASTA order at equal distance."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "gene_b.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "gene_b.fasta").write_text(
                 ">gene_b_1\nATGAAAAAATAA\n"
                 ">gene_b_2\nATGCCCTAA\n"
                 ">gene_b_3\nATGGGGTAA\n"
@@ -72,8 +73,8 @@ class SelectedAlleleTest(unittest.TestCase):
                 selected_amino_acid_alleles,
                 locus_count,
             ) = _collect_selected_allele_sequences(
-                schema_directory_path,
-                _find_all_fasta_file_paths(schema_directory_path),
+                scheme_directory_path,
+                _find_all_fasta_file_paths(scheme_directory_path),
             )
 
         self.assertEqual(locus_count, 1)
@@ -90,8 +91,8 @@ class SelectedAlleleTest(unittest.TestCase):
     def test_invalid_cds_can_supply_only_a_nucleotide_fallback(self) -> None:
         """Keep IUPAC DNA measurable when no allele can be translated."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "fragment.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "fragment.fasta").write_text(
                 ">fragment_1\nACGTR\n",
                 encoding="utf-8",
             )
@@ -101,8 +102,8 @@ class SelectedAlleleTest(unittest.TestCase):
                 selected_amino_acid_alleles,
                 _,
             ) = _collect_selected_allele_sequences(
-                schema_directory_path,
-                _find_all_fasta_file_paths(schema_directory_path),
+                scheme_directory_path,
+                _find_all_fasta_file_paths(scheme_directory_path),
             )
 
         self.assertEqual(len(selected_nucleotide_alleles), 1)
@@ -354,9 +355,9 @@ class CandidateParalogClassificationTest(unittest.TestCase):
     @staticmethod
     def _analysis(
         *matches: CrossLocusSimilarityMatch,
-    ) -> SchemaSimilarityAnalysis:
+    ) -> SchemeSimilarityAnalysis:
         """Wrap synthetic matches in the public analysis result type."""
-        return SchemaSimilarityAnalysis(
+        return SchemeSimilarityAnalysis(
             locus_count=4,
             nucleotide_selected_locus_count=4,
             amino_acid_selected_locus_count=4,
@@ -588,13 +589,13 @@ class SimilarityCacheTest(unittest.TestCase):
     def test_cache_is_reused_and_invalidated_by_fasta_change(self) -> None:
         """Avoid repeated searches until a source FASTA signature changes."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            first_locus_path = schema_directory_path / "gene_a.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            first_locus_path = scheme_directory_path / "gene_a.fasta"
             first_locus_path.write_text(
                 ">gene_a_1\nATGAAATAA\n",
                 encoding="utf-8",
             )
-            (schema_directory_path / "gene_b.fasta").write_text(
+            (scheme_directory_path / "gene_b.fasta").write_text(
                 ">gene_b_1\nATGCCCTAA\n",
                 encoding="utf-8",
             )
@@ -612,20 +613,20 @@ class SimilarityCacheTest(unittest.TestCase):
                     side_effect=self._empty_level_result,
                 ) as run_similarity_level,
             ):
-                first_analysis = get_schema_similarity_analysis(
-                    schema_directory_path,
+                first_analysis = get_scheme_similarity_analysis(
+                    scheme_directory_path,
                     progress_callback=progress_updates.append,
                 )
-                cached_analysis = get_schema_similarity_analysis(
-                    schema_directory_path,
+                cached_analysis = get_scheme_similarity_analysis(
+                    scheme_directory_path,
                     progress_callback=progress_updates.append,
                 )
                 first_locus_path.write_text(
                     ">gene_a_1\nATGAAATAA\n>gene_a_2\nATGGGGTAA\n",
                     encoding="utf-8",
                 )
-                recalculated_analysis = get_schema_similarity_analysis(
-                    schema_directory_path,
+                recalculated_analysis = get_scheme_similarity_analysis(
+                    scheme_directory_path,
                 )
 
             self.assertEqual(run_similarity_level.call_count, 4)
@@ -633,16 +634,16 @@ class SimilarityCacheTest(unittest.TestCase):
             self.assertTrue(cached_analysis.reused_from_cache)
             self.assertFalse(recalculated_analysis.reused_from_cache)
             self.assertTrue(
-                (schema_directory_path / SCHEMA_SIMILARITY_CACHE_FILENAME).is_file()
+                (scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAME).is_file()
             )
             self.assertTrue(
                 any(progress.reused_from_cache for progress in progress_updates)
             )
 
-    def test_empty_schema_is_reported_without_locus_pairs(self) -> None:
-        """Handle a schema without any recognized locus FASTA files."""
+    def test_empty_scheme_is_reported_without_locus_pairs(self) -> None:
+        """Handle a scheme without any recognized locus FASTA files."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
+            scheme_directory_path = Path(temporary_directory)
             with (
                 patch.object(
                     similarity,
@@ -655,7 +656,7 @@ class SimilarityCacheTest(unittest.TestCase):
                     side_effect=self._empty_level_result,
                 ),
             ):
-                analysis = get_schema_similarity_analysis(schema_directory_path)
+                analysis = get_scheme_similarity_analysis(scheme_directory_path)
 
         self.assertEqual(analysis.locus_count, 0)
         self.assertEqual(analysis.matches, ())
@@ -665,8 +666,8 @@ class SimilarityCacheTest(unittest.TestCase):
     def test_complete_cache_does_not_require_installed_blast(self) -> None:
         """Keep cached measurements available outside a BLAST-enabled shell."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "gene_a.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "gene_a.fasta").write_text(
                 ">gene_a_1\nATGAAATAA\n",
                 encoding="utf-8",
             )
@@ -682,7 +683,13 @@ class SimilarityCacheTest(unittest.TestCase):
                     side_effect=self._empty_level_result,
                 ),
             ):
-                get_schema_similarity_analysis(schema_directory_path)
+                get_scheme_similarity_analysis(scheme_directory_path)
+            legacy_cache_file_path = (
+                scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAMES[1]
+            )
+            (scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAME).replace(
+                legacy_cache_file_path
+            )
 
             with (
                 patch.object(
@@ -695,8 +702,8 @@ class SimilarityCacheTest(unittest.TestCase):
                     "_run_similarity_level",
                 ) as run_similarity_level,
             ):
-                cached_analysis = get_schema_similarity_analysis(
-                    schema_directory_path
+                cached_analysis = get_scheme_similarity_analysis(
+                    scheme_directory_path
                 )
 
         self.assertTrue(cached_analysis.reused_from_cache)
@@ -712,7 +719,7 @@ class SimilarityCacheTest(unittest.TestCase):
 class BlastIntegrationTest(unittest.TestCase):
     """Exercise the public API with real nucleotide and protein BLAST runs."""
 
-    def test_tiny_schema_similarity_and_cache_reuse(self) -> None:
+    def test_tiny_scheme_similarity_and_cache_reuse(self) -> None:
         """Find reciprocal cross-locus hits and then load them from cache."""
         diverse_coding_codons = [
             "GCT",
@@ -731,22 +738,22 @@ class BlastIntegrationTest(unittest.TestCase):
         first_sequence = f"ATG{''.join(diverse_coding_codons)}TAA"
         second_sequence = f"ATG{''.join(variant_coding_codons)}TAA"
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "gene_a.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "gene_a.fasta").write_text(
                 f">gene_a_1\n{first_sequence}\n",
                 encoding="utf-8",
             )
-            (schema_directory_path / "gene_b.fasta").write_text(
+            (scheme_directory_path / "gene_b.fasta").write_text(
                 f">gene_b_1\n{second_sequence}\n",
                 encoding="utf-8",
             )
 
-            analysis = get_schema_similarity_analysis(
-                schema_directory_path,
+            analysis = get_scheme_similarity_analysis(
+                scheme_directory_path,
                 maximum_threads=2,
             )
-            cached_analysis = get_schema_similarity_analysis(
-                schema_directory_path,
+            cached_analysis = get_scheme_similarity_analysis(
+                scheme_directory_path,
                 maximum_threads=2,
             )
 

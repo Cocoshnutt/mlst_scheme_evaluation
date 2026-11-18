@@ -6,21 +6,23 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from schema import bsr
-from schema.bsr import (
+from scheme import bsr
+from scheme.bsr import (
+    SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME,
+    SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAMES,
     AlleleBlastScoreRatio,
     InterLocusBlastScoreRatio,
     LocusRepresentativeBsrMeasurements,
-    SchemaRepresentativeBsrAnalysis,
+    SchemeRepresentativeBsrAnalysis,
     _collect_protein_alleles,
     _CollectedLocus,
     _create_bsr_measurements,
     _create_high_bsr_groups,
     _ProteinAllele,
     classify_representative_bsr_analysis,
-    get_schema_representative_bsr_analysis,
+    get_scheme_representative_bsr_analysis,
 )
-from schema.similarity import _find_all_fasta_file_paths
+from scheme.similarity import _find_all_fasta_file_paths
 
 
 class ProteinAlleleCollectionTest(unittest.TestCase):
@@ -29,8 +31,8 @@ class ProteinAlleleCollectionTest(unittest.TestCase):
     def test_collects_only_valid_translated_alleles(self) -> None:
         """Exclude invalid records and select the modal-length valid CDS."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "gene_a.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "gene_a.fasta").write_text(
                 ">outlier\nATGAAAAAATAA\n"
                 ">modal_first\nATGCCCTAA\n"
                 ">modal_second\nATGGGGTAA\n"
@@ -39,8 +41,8 @@ class ProteinAlleleCollectionTest(unittest.TestCase):
             )
 
             collected_loci, protein_alleles = _collect_protein_alleles(
-                schema_directory_path,
-                _find_all_fasta_file_paths(schema_directory_path),
+                scheme_directory_path,
+                _find_all_fasta_file_paths(scheme_directory_path),
             )
 
         self.assertEqual(len(collected_loci), 1)
@@ -152,9 +154,9 @@ class BsrClassificationTest(unittest.TestCase):
     """Test inclusive thresholding, pair collapse, and connected groups."""
 
     @staticmethod
-    def _analysis() -> SchemaRepresentativeBsrAnalysis:
+    def _analysis() -> SchemeRepresentativeBsrAnalysis:
         """Return raw measurements with one unavailable locus and three edges."""
-        return SchemaRepresentativeBsrAnalysis(
+        return SchemeRepresentativeBsrAnalysis(
             locus_measurements=(
                 LocusRepresentativeBsrMeasurements(
                     locus_name="gene_a",
@@ -275,7 +277,7 @@ class RepresentativeBsrCacheTest(unittest.TestCase):
 
     @staticmethod
     def _empty_analysis_result(*args, **kwargs):
-        """Return a deterministic no-hit analysis for a collected schema."""
+        """Return a deterministic no-hit analysis for a collected scheme."""
         collected_loci = kwargs["collected_loci"]
         return (
             tuple(
@@ -303,8 +305,8 @@ class RepresentativeBsrCacheTest(unittest.TestCase):
     def test_reuses_cache_and_invalidates_when_source_changes(self) -> None:
         """Avoid rerunning BLAST until the FASTA source signature changes."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            locus_file_path = schema_directory_path / "gene_a.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            locus_file_path = scheme_directory_path / "gene_a.fasta"
             locus_file_path.write_text(
                 ">gene_a_1\nATGCCCTAA\n",
                 encoding="utf-8",
@@ -321,19 +323,27 @@ class RepresentativeBsrCacheTest(unittest.TestCase):
                     side_effect=self._empty_analysis_result,
                 ) as run_blastp_analysis,
             ):
-                first_analysis = get_schema_representative_bsr_analysis(
-                    schema_directory_path
+                first_analysis = get_scheme_representative_bsr_analysis(
+                    scheme_directory_path
                 )
-                cached_analysis = get_schema_representative_bsr_analysis(
-                    schema_directory_path
+                legacy_cache_file_path = (
+                    scheme_directory_path
+                    / SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAMES[1]
+                )
+                (
+                    scheme_directory_path
+                    / SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME
+                ).replace(legacy_cache_file_path)
+                cached_analysis = get_scheme_representative_bsr_analysis(
+                    scheme_directory_path
                 )
                 locus_file_path.write_text(
                     ">gene_a_1\nATGCCCTAA\n"
                     ">gene_a_2\nATGGGGTAA\n",
                     encoding="utf-8",
                 )
-                recalculated_analysis = get_schema_representative_bsr_analysis(
-                    schema_directory_path
+                recalculated_analysis = get_scheme_representative_bsr_analysis(
+                    scheme_directory_path
                 )
 
         self.assertFalse(first_analysis.reused_from_cache)
@@ -349,7 +359,7 @@ class RepresentativeBsrCacheTest(unittest.TestCase):
 class RepresentativeBsrIntegrationTest(unittest.TestCase):
     """Exercise the public API with a real batched protein BLAST search."""
 
-    def test_tiny_schema_analysis_and_cache_reuse(self) -> None:
+    def test_tiny_scheme_analysis_and_cache_reuse(self) -> None:
         """Measure identical proteins across loci and then reuse the cache."""
         coding_codons = (
             "GCT",
@@ -375,23 +385,23 @@ class RepresentativeBsrIntegrationTest(unittest.TestCase):
         coding_sequence = "ATG" + "".join(coding_codons) + "TAA"
         synonymous_sequence = coding_sequence.replace("GCT", "GCC", 1)
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "gene_a.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "gene_a.fasta").write_text(
                 f">gene_a_1\n{coding_sequence}\n"
                 f">gene_a_2\n{synonymous_sequence}\n",
                 encoding="utf-8",
             )
-            (schema_directory_path / "gene_b.fasta").write_text(
+            (scheme_directory_path / "gene_b.fasta").write_text(
                 f">gene_b_1\n{coding_sequence}\n",
                 encoding="utf-8",
             )
 
-            analysis = get_schema_representative_bsr_analysis(
-                schema_directory_path,
+            analysis = get_scheme_representative_bsr_analysis(
+                scheme_directory_path,
                 maximum_threads=1,
             )
-            cached_analysis = get_schema_representative_bsr_analysis(
-                schema_directory_path,
+            cached_analysis = get_scheme_representative_bsr_analysis(
+                scheme_directory_path,
                 maximum_threads=1,
             )
             classification = classify_representative_bsr_analysis(analysis)

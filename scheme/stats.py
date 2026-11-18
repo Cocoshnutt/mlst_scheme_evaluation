@@ -33,21 +33,27 @@ from .info import (
     count_nucleotide_base_composition,
 )
 
-SCHEMA_STATISTICS_CACHE_FILENAME = ".schema-statistics-cache.json"
-SCHEMA_STATISTICS_CACHE_VERSION = 3
+SCHEME_STATISTICS_CACHE_FILENAME = ".scheme-statistics-cache.json"
+LEGACY_STATISTICS_CACHE_FILENAME = ".schema-statistics-cache.json"
+SCHEME_STATISTICS_CACHE_FILENAMES = (
+    SCHEME_STATISTICS_CACHE_FILENAME,
+    LEGACY_STATISTICS_CACHE_FILENAME,
+)
+SCHEME_STATISTICS_CACHE_VERSION = 3
 DEFAULT_FREQUENT_PEAK_RELATIVE_THRESHOLD_PERCENTAGE = 50.0
 
 type AltairChart = alt.Chart | alt.LayerChart | alt.VConcatChart
 
 __all__ = [
     "DEFAULT_FREQUENT_PEAK_RELATIVE_THRESHOLD_PERCENTAGE",
-    "SCHEMA_STATISTICS_CACHE_FILENAME",
-    "SCHEMA_STATISTICS_CACHE_VERSION",
+    "SCHEME_STATISTICS_CACHE_FILENAME",
+    "SCHEME_STATISTICS_CACHE_FILENAMES",
+    "SCHEME_STATISTICS_CACHE_VERSION",
     "AlleleLengthPeak",
     "LocusStatistics",
-    "SchemaStatisticsCharts",
-    "create_schema_statistics_charts",
-    "get_schema_statistics",
+    "SchemeStatisticsCharts",
+    "create_scheme_statistics_charts",
+    "get_scheme_statistics",
 ]
 
 
@@ -72,7 +78,7 @@ class LocusStatistics:
     """Allele count and sequence-length statistics for one locus.
 
     Attributes:
-        locus_name: Schema-relative path of the locus FASTA file.
+        locus_name: Scheme-relative path of the locus FASTA file.
         allele_count: Number of allele sequences in the locus.
         modal_allele_length: Most frequently occurring allele length. The
             shortest length is selected when modes are tied.
@@ -150,7 +156,7 @@ class _CachedLocusStatistics:
 
 
 @dataclass(frozen=True)
-class SchemaStatisticsCharts:
+class SchemeStatisticsCharts:
     """The locus-statistics charts displayed by the Marimo report."""
 
     total_alleles_chart: AltairChart
@@ -160,29 +166,29 @@ class SchemaStatisticsCharts:
     guanine_cytosine_content_chart: AltairChart
 
 
-def _resolve_schema_directory_path(schema_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted schema directory.
+def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
+    """Resolve and validate an extracted scheme directory.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
 
     Returns:
-        Absolute path to the schema directory.
+        Absolute path to the scheme directory.
 
     Raises:
         FileNotFoundError: If the supplied path does not exist.
         NotADirectoryError: If the supplied path is not a directory.
     """
-    resolved_schema_directory_path = Path(schema_directory_path).resolve()
-    if not resolved_schema_directory_path.exists():
+    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
+    if not resolved_scheme_directory_path.exists():
         raise FileNotFoundError(
-            f"Schema directory does not exist: {resolved_schema_directory_path}"
+            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
         )
-    if not resolved_schema_directory_path.is_dir():
+    if not resolved_scheme_directory_path.is_dir():
         raise NotADirectoryError(
-            f"Schema path is not a directory: {resolved_schema_directory_path}"
+            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
         )
-    return resolved_schema_directory_path
+    return resolved_scheme_directory_path
 
 
 def _is_fasta_file(candidate_file_path: Path) -> bool:
@@ -194,13 +200,13 @@ def _is_fasta_file(candidate_file_path: Path) -> bool:
 
 
 def _find_allele_file_paths(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
 ) -> tuple[Path, ...]:
     """Return recognized locus FASTA files in deterministic path order."""
     return tuple(
         sorted(
             candidate_file_path
-            for candidate_file_path in schema_directory_path.rglob("*")
+            for candidate_file_path in scheme_directory_path.rglob("*")
             if _is_fasta_file(candidate_file_path)
         )
     )
@@ -511,7 +517,7 @@ def _materialize_locus_statistics(
 
 
 def _create_source_signature(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     allele_file_paths: Iterable[Path],
 ) -> tuple[tuple[str, int, int], ...]:
     """Create a metadata signature used to invalidate stale statistics."""
@@ -521,7 +527,7 @@ def _create_source_signature(
         source_signature.append(
             (
                 allele_file_path.relative_to(
-                    schema_directory_path
+                    scheme_directory_path
                 ).as_posix(),
                 allele_file_status.st_size,
                 allele_file_status.st_mtime_ns,
@@ -530,15 +536,22 @@ def _create_source_signature(
     return tuple(source_signature)
 
 
-def _read_cached_schema_statistics(
-    schema_directory_path: Path,
+def _read_cached_scheme_statistics(
+    scheme_directory_path: Path,
     source_signature: tuple[tuple[str, int, int], ...],
 ) -> tuple[_CachedLocusStatistics, ...] | None:
     """Read a compatible statistics cache, or return ``None``."""
-    cache_file_path = schema_directory_path / SCHEMA_STATISTICS_CACHE_FILENAME
+    cache_file_path = next(
+        (
+            scheme_directory_path / cache_filename
+            for cache_filename in SCHEME_STATISTICS_CACHE_FILENAMES
+            if (scheme_directory_path / cache_filename).is_file()
+        ),
+        scheme_directory_path / SCHEME_STATISTICS_CACHE_FILENAME,
+    )
     try:
         cached_data = json.loads(cache_file_path.read_text(encoding="utf-8"))
-        if cached_data["cache_version"] != SCHEMA_STATISTICS_CACHE_VERSION:
+        if cached_data["cache_version"] != SCHEME_STATISTICS_CACHE_VERSION:
             return None
         cached_source_signature = tuple(
             (str(relative_path), int(file_size), int(modification_time))
@@ -622,14 +635,14 @@ def _optional_float(value: object) -> float | None:
     return None if value is None else float(value)
 
 
-def _write_cached_schema_statistics(
-    schema_directory_path: Path,
+def _write_cached_scheme_statistics(
+    scheme_directory_path: Path,
     source_signature: tuple[tuple[str, int, int], ...],
     locus_statistics: tuple[_CachedLocusStatistics, ...],
 ) -> None:
     """Atomically write calculated locus statistics to the scheme cache."""
     cached_data = {
-        "cache_version": SCHEMA_STATISTICS_CACHE_VERSION,
+        "cache_version": SCHEME_STATISTICS_CACHE_VERSION,
         "source_signature": source_signature,
         "locus_statistics": [
             asdict(locus_information) for locus_information in locus_statistics
@@ -640,23 +653,23 @@ def _write_cached_schema_statistics(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=schema_directory_path,
-            prefix=f"{SCHEMA_STATISTICS_CACHE_FILENAME}.",
+            dir=scheme_directory_path,
+            prefix=f"{SCHEME_STATISTICS_CACHE_FILENAME}.",
             delete=False,
         ) as temporary_cache_file:
             json.dump(cached_data, temporary_cache_file, separators=(",", ":"))
             temporary_cache_file_path = Path(temporary_cache_file.name)
 
         temporary_cache_file_path.replace(
-            schema_directory_path / SCHEMA_STATISTICS_CACHE_FILENAME
+            scheme_directory_path / SCHEME_STATISTICS_CACHE_FILENAME
         )
     finally:
         if temporary_cache_file_path is not None:
             temporary_cache_file_path.unlink(missing_ok=True)
 
 
-def get_schema_statistics(
-    schema_directory_path: str | Path,
+def get_scheme_statistics(
+    scheme_directory_path: str | Path,
     *,
     frequent_peak_relative_threshold_percentage: float = (
         DEFAULT_FREQUENT_PEAK_RELATIVE_THRESHOLD_PERCENTAGE
@@ -665,18 +678,18 @@ def get_schema_statistics(
     """Return cached or newly calculated statistics for every locus.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
         frequent_peak_relative_threshold_percentage: Minimum exact-length
             count as a percentage of the dominant exact-length count. This
             descriptive threshold controls frequent peaks and the modality
             category without invalidating the underlying cache.
 
     Returns:
-        Locus statistics ordered by schema-relative FASTA path.
+        Locus statistics ordered by scheme-relative FASTA path.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         OSError: If a locus file cannot be read or decompressed.
         UnicodeError: If a locus file is not valid UTF-8 text.
         ValueError: If the frequent-peak threshold is outside 0–100.
@@ -684,51 +697,83 @@ def get_schema_statistics(
     _validate_frequent_peak_relative_threshold_percentage(
         frequent_peak_relative_threshold_percentage
     )
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    allele_file_paths = _find_allele_file_paths(resolved_schema_directory_path)
+    allele_file_paths = _find_allele_file_paths(resolved_scheme_directory_path)
     source_signature = _create_source_signature(
-        resolved_schema_directory_path,
+        resolved_scheme_directory_path,
         allele_file_paths,
     )
-    cached_schema_statistics = _read_cached_schema_statistics(
-        resolved_schema_directory_path,
+    cached_scheme_statistics = _read_cached_scheme_statistics(
+        resolved_scheme_directory_path,
         source_signature,
     )
-    if cached_schema_statistics is not None:
+    if cached_scheme_statistics is not None:
         return tuple(
             _materialize_locus_statistics(
                 cached_locus_statistics,
                 frequent_peak_relative_threshold_percentage,
             )
-            for cached_locus_statistics in cached_schema_statistics
+            for cached_locus_statistics in cached_scheme_statistics
         )
 
-    calculated_locus_statistics: list[_CachedLocusStatistics] = []
-    for allele_file_path in allele_file_paths:
-        (
-            allele_lengths,
-            nucleotide_base_composition,
-        ) = _read_locus_sequence_summary(allele_file_path)
-        calculated_locus_statistics.append(
-            _calculate_locus_statistics(
-                allele_file_path.relative_to(
-                    resolved_schema_directory_path
-                ).as_posix(),
-                allele_lengths,
-                nucleotide_base_composition,
-            )
+    from .static_analysis import get_shared_scheme_static_analysis
+
+    shared_static_analysis = get_shared_scheme_static_analysis(
+        resolved_scheme_directory_path
+    )
+    cached_locus_statistics = tuple(
+        _CachedLocusStatistics(
+            locus_name=locus_analysis.relative_file_path,
+            allele_count=locus_analysis.allele_count,
+            modal_allele_length=locus_analysis.modal_allele_length,
+            modal_allele_lengths=locus_analysis.modal_allele_lengths,
+            mean_allele_length=locus_analysis.mean_allele_length,
+            allele_length_frequencies=(
+                locus_analysis.allele_length_frequencies
+            ),
+            alleles_below_mode_threshold_count=(
+                locus_analysis.alleles_below_mode_threshold_count
+            ),
+            alleles_above_mode_threshold_count=(
+                locus_analysis.alleles_above_mode_threshold_count
+            ),
+            minimum_allele_length=locus_analysis.minimum_allele_length,
+            first_quartile_allele_length=(
+                locus_analysis.first_quartile_allele_length
+            ),
+            median_allele_length=locus_analysis.median_allele_length,
+            third_quartile_allele_length=(
+                locus_analysis.third_quartile_allele_length
+            ),
+            maximum_allele_length=locus_analysis.maximum_allele_length,
+            lower_whisker_allele_length=(
+                locus_analysis.lower_whisker_allele_length
+            ),
+            upper_whisker_allele_length=(
+                locus_analysis.upper_whisker_allele_length
+            ),
+            guanine_cytosine_base_count=(
+                locus_analysis.guanine_cytosine_base_count
+            ),
+            canonical_nucleotide_base_count=(
+                locus_analysis.canonical_nucleotide_base_count
+            ),
+            excluded_nucleotide_base_count=(
+                locus_analysis.excluded_nucleotide_base_count
+            ),
         )
-    cached_locus_statistics = tuple(calculated_locus_statistics)
+        for locus_analysis in shared_static_analysis.loci
+    )
     try:
-        _write_cached_schema_statistics(
-            resolved_schema_directory_path,
+        _write_cached_scheme_statistics(
+            resolved_scheme_directory_path,
             source_signature,
             cached_locus_statistics,
         )
     except OSError:
-        # Read-only schema directories can still be analyzed without caching.
+        # Read-only scheme directories can still be analyzed without caching.
         pass
     return tuple(
         _materialize_locus_statistics(
@@ -749,14 +794,14 @@ def _apply_chart_style(chart: AltairChart) -> AltairChart:
     )
 
 
-def create_schema_statistics_charts(
+def create_scheme_statistics_charts(
     locus_statistics: Iterable[LocusStatistics],
-) -> SchemaStatisticsCharts:
+) -> SchemeStatisticsCharts:
     """Create the four Altair locus-statistics panels.
 
     Args:
         locus_statistics: Per-locus statistics returned by
-            :func:`get_schema_statistics`.
+            :func:`get_scheme_statistics`.
 
     Returns:
         Styled Altair charts corresponding to panels A through D and the
@@ -765,7 +810,7 @@ def create_schema_statistics_charts(
     ordered_locus_statistics = tuple(locus_statistics)
     # Keep chart datasets deliberately narrow. Embedding the complete public
     # dataclass would copy tied modes and peak records into every chart layer,
-    # producing multi-megabyte Marimo outputs for large schemas.
+    # producing multi-megabyte Marimo outputs for large schemes.
     locus_rows = [
         {
             "locus_index": locus_index,
@@ -1012,7 +1057,7 @@ def create_schema_statistics_charts(
         )
     )
 
-    return SchemaStatisticsCharts(
+    return SchemeStatisticsCharts(
         total_alleles_chart=total_alleles_chart,
         allele_mode_size_chart=allele_mode_size_chart,
         locus_statistics_chart=locus_statistics_chart,

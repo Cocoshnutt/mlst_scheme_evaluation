@@ -1,7 +1,7 @@
 """Inspect an extracted MLST scheme and report basic sequence statistics.
 
 This module counts loci and evaluates allele coding sequences in a directory
-produced by ``schema.cache.cache_archive``. A locus is represented by one FASTA
+produced by ``scheme.cache.cache_archive``. A locus is represented by one FASTA
 file, and an allele is represented by one FASTA record within those files. The
 evaluation reports valid alleles, individual invalidity categories, and alleles
 shorter than a configurable minimum sequence length. It also reports
@@ -12,7 +12,7 @@ other noncanonical characters are counted separately. Common FASTA filename
 extensions are recognized in both uncompressed and gzip-compressed form.
 
 Notebook code can call :func:`count_loci`, :func:`count_alleles`, or
-:func:`get_schema_information`. The module can also be executed as a
+:func:`get_scheme_information`. The module can also be executed as a
 command-line program and can print either a readable summary or JSON.
 """
 
@@ -38,25 +38,31 @@ FASTA_FILENAME_SUFFIXES = (
 VALID_DNA_BASES = frozenset("ACGT")
 BACTERIAL_START_CODONS = frozenset({"ATG", "GTG", "TTG"})
 STOP_CODONS = frozenset({"TAA", "TAG", "TGA"})
-SCHEMA_INFORMATION_CACHE_FILENAME = ".schema-information-cache.json"
-SCHEMA_INFORMATION_CACHE_VERSION = 4
+SCHEME_INFORMATION_CACHE_FILENAME = ".scheme-information-cache.json"
+LEGACY_INFORMATION_CACHE_FILENAME = ".schema-information-cache.json"
+SCHEME_INFORMATION_CACHE_FILENAMES = (
+    SCHEME_INFORMATION_CACHE_FILENAME,
+    LEGACY_INFORMATION_CACHE_FILENAME,
+)
+SCHEME_INFORMATION_CACHE_VERSION = 4
 
 __all__ = [
     "BACTERIAL_START_CODONS",
     "FASTA_FILENAME_SUFFIXES",
-    "SCHEMA_INFORMATION_CACHE_FILENAME",
-    "SCHEMA_INFORMATION_CACHE_VERSION",
+    "SCHEME_INFORMATION_CACHE_FILENAME",
+    "SCHEME_INFORMATION_CACHE_FILENAMES",
+    "SCHEME_INFORMATION_CACHE_VERSION",
     "STOP_CODONS",
     "VALID_DNA_BASES",
     "NucleotideBaseComposition",
-    "SchemaInformation",
+    "SchemeInformation",
     "count_alleles",
     "count_alleles_below_minimum_length",
     "count_invalid_alleles",
     "count_loci",
     "count_nucleotide_base_composition",
     "count_valid_alleles",
-    "get_schema_information",
+    "get_scheme_information",
     "is_valid_allele_sequence",
 ]
 
@@ -128,7 +134,7 @@ def count_nucleotide_base_composition(
 
 
 @dataclass(frozen=True)
-class SchemaInformation:
+class SchemeInformation:
     """Summary counts for an extracted MLST scheme.
 
     Attributes:
@@ -238,8 +244,8 @@ class _AlleleCounts:
 
 
 @dataclass(frozen=True)
-class _CachedSchemaAnalysis:
-    """Schema metrics and allele lengths persisted in the extracted schema."""
+class _CachedSchemeAnalysis:
+    """Scheme metrics and allele lengths persisted in the extracted scheme."""
 
     locus_count: int
     allele_counts: _AlleleCounts
@@ -247,31 +253,31 @@ class _CachedSchemaAnalysis:
     alleles_above_locus_mode_threshold_count: int
 
 
-def _resolve_schema_directory_path(schema_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted schema directory path.
+def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
+    """Resolve and validate an extracted scheme directory path.
 
     Args:
-        schema_directory_path: Directory containing the extracted schema.
+        scheme_directory_path: Directory containing the extracted scheme.
 
     Returns:
-        The absolute path to the schema directory.
+        The absolute path to the scheme directory.
 
     Raises:
         FileNotFoundError: If the supplied path does not exist.
         NotADirectoryError: If the supplied path is not a directory.
     """
-    resolved_schema_directory_path = Path(schema_directory_path).resolve()
+    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
 
-    if not resolved_schema_directory_path.exists():
+    if not resolved_scheme_directory_path.exists():
         raise FileNotFoundError(
-            f"Schema directory does not exist: {resolved_schema_directory_path}"
+            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
         )
-    if not resolved_schema_directory_path.is_dir():
+    if not resolved_scheme_directory_path.is_dir():
         raise NotADirectoryError(
-            f"Schema path is not a directory: {resolved_schema_directory_path}"
+            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
         )
 
-    return resolved_schema_directory_path
+    return resolved_scheme_directory_path
 
 
 def _is_fasta_file(allele_file_path: Path) -> bool:
@@ -282,12 +288,12 @@ def _is_fasta_file(allele_file_path: Path) -> bool:
     )
 
 
-def _find_allele_file_paths(schema_directory_path: Path) -> tuple[Path, ...]:
-    """Return all recognized FASTA files below a schema directory."""
+def _find_allele_file_paths(scheme_directory_path: Path) -> tuple[Path, ...]:
+    """Return all recognized FASTA files below a scheme directory."""
     return tuple(
         sorted(
             candidate_file_path
-            for candidate_file_path in schema_directory_path.rglob("*")
+            for candidate_file_path in scheme_directory_path.rglob("*")
             if _is_fasta_file(candidate_file_path)
         )
     )
@@ -615,21 +621,26 @@ def _count_locus_length_outliers(
     return alleles_below_threshold_count, alleles_above_threshold_count
 
 
-def _read_cached_schema_analysis(
-    schema_directory_path: Path,
-) -> _CachedSchemaAnalysis | None:
+def _read_cached_scheme_analysis(
+    scheme_directory_path: Path,
+) -> _CachedSchemeAnalysis | None:
     """Read a compatible cached analysis, returning ``None`` if unavailable."""
-    schema_information_cache_file_path = (
-        schema_directory_path / SCHEMA_INFORMATION_CACHE_FILENAME
+    scheme_information_cache_file_path = next(
+        (
+            scheme_directory_path / cache_filename
+            for cache_filename in SCHEME_INFORMATION_CACHE_FILENAMES
+            if (scheme_directory_path / cache_filename).is_file()
+        ),
+        scheme_directory_path / SCHEME_INFORMATION_CACHE_FILENAME,
     )
 
     try:
         cached_analysis_data = json.loads(
-            schema_information_cache_file_path.read_text(encoding="utf-8")
+            scheme_information_cache_file_path.read_text(encoding="utf-8")
         )
         if (
             cached_analysis_data["cache_version"]
-            != SCHEMA_INFORMATION_CACHE_VERSION
+            != SCHEME_INFORMATION_CACHE_VERSION
         ):
             return None
 
@@ -704,7 +715,7 @@ def _read_cached_schema_analysis(
     ):
         return None
 
-    return _CachedSchemaAnalysis(
+    return _CachedSchemeAnalysis(
         locus_count=locus_count,
         allele_counts=allele_counts,
         alleles_below_locus_mode_threshold_count=(
@@ -716,15 +727,15 @@ def _read_cached_schema_analysis(
     )
 
 
-def _write_cached_schema_analysis(
-    schema_directory_path: Path,
-    cached_schema_analysis: _CachedSchemaAnalysis,
+def _write_cached_scheme_analysis(
+    scheme_directory_path: Path,
+    cached_scheme_analysis: _CachedSchemeAnalysis,
 ) -> None:
-    """Atomically persist schema metrics and allele lengths as JSON."""
-    allele_counts = cached_schema_analysis.allele_counts
+    """Atomically persist scheme metrics and allele lengths as JSON."""
+    allele_counts = cached_scheme_analysis.allele_counts
     cached_analysis_data = {
-        "cache_version": SCHEMA_INFORMATION_CACHE_VERSION,
-        "locus_count": cached_schema_analysis.locus_count,
+        "cache_version": SCHEME_INFORMATION_CACHE_VERSION,
+        "locus_count": cached_scheme_analysis.locus_count,
         "allele_count": allele_counts.allele_count,
         "valid_allele_count": allele_counts.valid_allele_count,
         "incomplete_orf_allele_count": (
@@ -750,14 +761,14 @@ def _write_cached_schema_analysis(
             allele_counts.excluded_nucleotide_base_count
         ),
         "alleles_below_locus_mode_threshold_count": (
-            cached_schema_analysis.alleles_below_locus_mode_threshold_count
+            cached_scheme_analysis.alleles_below_locus_mode_threshold_count
         ),
         "alleles_above_locus_mode_threshold_count": (
-            cached_schema_analysis.alleles_above_locus_mode_threshold_count
+            cached_scheme_analysis.alleles_above_locus_mode_threshold_count
         ),
     }
-    schema_information_cache_file_path = (
-        schema_directory_path / SCHEMA_INFORMATION_CACHE_FILENAME
+    scheme_information_cache_file_path = (
+        scheme_directory_path / SCHEME_INFORMATION_CACHE_FILENAME
     )
 
     temporary_cache_file_path: Path | None = None
@@ -765,170 +776,214 @@ def _write_cached_schema_analysis(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=schema_directory_path,
-            prefix=f"{SCHEMA_INFORMATION_CACHE_FILENAME}.",
+            dir=scheme_directory_path,
+            prefix=f"{SCHEME_INFORMATION_CACHE_FILENAME}.",
             delete=False,
         ) as temporary_cache_file:
             json.dump(cached_analysis_data, temporary_cache_file, separators=(",", ":"))
             temporary_cache_file_path = Path(temporary_cache_file.name)
 
-        temporary_cache_file_path.replace(schema_information_cache_file_path)
+        temporary_cache_file_path.replace(scheme_information_cache_file_path)
     finally:
         if temporary_cache_file_path is not None:
             temporary_cache_file_path.unlink(missing_ok=True)
 
 
-def _get_or_create_cached_schema_analysis(
-    schema_directory_path: Path,
-) -> _CachedSchemaAnalysis:
-    """Return cached schema metrics, calculating and persisting them once."""
-    cached_schema_analysis = _read_cached_schema_analysis(schema_directory_path)
-    if cached_schema_analysis is not None:
-        return cached_schema_analysis
+def _get_or_create_cached_scheme_analysis(
+    scheme_directory_path: Path,
+) -> _CachedSchemeAnalysis:
+    """Return cached scheme metrics, calculating and persisting them once."""
+    cached_scheme_analysis = _read_cached_scheme_analysis(scheme_directory_path)
+    if cached_scheme_analysis is not None:
+        return cached_scheme_analysis
 
-    allele_file_paths = _find_allele_file_paths(schema_directory_path)
-    (
-        allele_counts,
-        alleles_below_locus_mode_threshold_count,
-        alleles_above_locus_mode_threshold_count,
-    ) = _count_alleles_in_files(
-        allele_file_paths,
-        minimum_sequence_length=0,
+    from .static_analysis import get_shared_scheme_static_analysis
+
+    shared_static_analysis = get_shared_scheme_static_analysis(
+        scheme_directory_path
+    )
+    allele_lengths = tuple(
+        allele_length
+        for locus_analysis in shared_static_analysis.loci
+        for allele_length in locus_analysis.allele_lengths
+    )
+    allele_counts = _AlleleCounts(
+        allele_count=len(allele_lengths),
+        valid_allele_count=sum(
+            locus_analysis.valid_allele_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        incomplete_orf_allele_count=sum(
+            locus_analysis.incomplete_orf_allele_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        ambiguous_bases_allele_count=sum(
+            locus_analysis.ambiguous_bases_allele_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        missing_start_or_stop_codon_allele_count=sum(
+            locus_analysis.missing_start_or_stop_codon_allele_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        in_frame_stop_codon_allele_count=sum(
+            locus_analysis.in_frame_stop_codon_allele_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        alleles_below_minimum_length_count=0,
+        allele_lengths=allele_lengths,
+        guanine_cytosine_base_count=sum(
+            locus_analysis.guanine_cytosine_base_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        canonical_nucleotide_base_count=sum(
+            locus_analysis.canonical_nucleotide_base_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
+        excluded_nucleotide_base_count=sum(
+            locus_analysis.excluded_nucleotide_base_count
+            for locus_analysis in shared_static_analysis.loci
+        ),
     )
 
-    cached_schema_analysis = _CachedSchemaAnalysis(
-        locus_count=len(allele_file_paths),
+    cached_scheme_analysis = _CachedSchemeAnalysis(
+        locus_count=len(shared_static_analysis.loci),
         allele_counts=allele_counts,
         alleles_below_locus_mode_threshold_count=(
-            alleles_below_locus_mode_threshold_count
+            sum(
+                locus_analysis.alleles_below_mode_threshold_count
+                for locus_analysis in shared_static_analysis.loci
+            )
         ),
         alleles_above_locus_mode_threshold_count=(
-            alleles_above_locus_mode_threshold_count
+            sum(
+                locus_analysis.alleles_above_mode_threshold_count
+                for locus_analysis in shared_static_analysis.loci
+            )
         ),
     )
 
     try:
-        _write_cached_schema_analysis(
-            schema_directory_path,
-            cached_schema_analysis,
+        _write_cached_scheme_analysis(
+            scheme_directory_path,
+            cached_scheme_analysis,
         )
     except OSError:
-        # Read-only schema directories can still be analyzed without caching.
+        # Read-only scheme directories can still be analyzed without caching.
         pass
 
-    return cached_schema_analysis
+    return cached_scheme_analysis
 
 
-def count_loci(schema_directory_path: str | Path) -> int:
-    """Count locus FASTA files in an extracted schema directory.
+def count_loci(scheme_directory_path: str | Path) -> int:
+    """Count locus FASTA files in an extracted scheme directory.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
 
     Returns:
         The number of recognized FASTA files found recursively.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
     """
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    cached_schema_analysis = _get_or_create_cached_schema_analysis(
-        resolved_schema_directory_path
+    cached_scheme_analysis = _get_or_create_cached_scheme_analysis(
+        resolved_scheme_directory_path
     )
-    return cached_schema_analysis.locus_count
+    return cached_scheme_analysis.locus_count
 
 
-def count_alleles(schema_directory_path: str | Path) -> int:
-    """Count FASTA records across all loci in an extracted schema directory.
+def count_alleles(scheme_directory_path: str | Path) -> int:
+    """Count FASTA records across all loci in an extracted scheme directory.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
 
     Returns:
         The total number of FASTA records across all recognized locus files.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         OSError: If an allele file cannot be read or decompressed.
         UnicodeError: If an allele file is not valid UTF-8 text.
     """
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    cached_schema_analysis = _get_or_create_cached_schema_analysis(
-        resolved_schema_directory_path
+    cached_scheme_analysis = _get_or_create_cached_scheme_analysis(
+        resolved_scheme_directory_path
     )
-    return cached_schema_analysis.allele_counts.allele_count
+    return cached_scheme_analysis.allele_counts.allele_count
 
 
-def count_valid_alleles(schema_directory_path: str | Path) -> int:
-    """Count valid coding alleles across all loci in an extracted schema.
+def count_valid_alleles(scheme_directory_path: str | Path) -> int:
+    """Count valid coding alleles across all loci in an extracted scheme.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
 
     Returns:
         The number of alleles accepted by :func:`is_valid_allele_sequence`.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         OSError: If an allele file cannot be read or decompressed.
         UnicodeError: If an allele file is not valid UTF-8 text.
     """
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    cached_schema_analysis = _get_or_create_cached_schema_analysis(
-        resolved_schema_directory_path
+    cached_scheme_analysis = _get_or_create_cached_scheme_analysis(
+        resolved_scheme_directory_path
     )
-    return cached_schema_analysis.allele_counts.valid_allele_count
+    return cached_scheme_analysis.allele_counts.valid_allele_count
 
 
-def count_invalid_alleles(schema_directory_path: str | Path) -> int:
+def count_invalid_alleles(scheme_directory_path: str | Path) -> int:
     """Return the sum of all coding-sequence invalidity category counts.
 
     An allele that fails multiple rules contributes once to each failed
     category, so this value can exceed the number of unique invalid alleles.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
 
     Returns:
         The sum of the incomplete ORF, ambiguous bases, missing start/stop
         codon, and in-frame stop codon counts.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         OSError: If an allele file cannot be read or decompressed.
         UnicodeError: If an allele file is not valid UTF-8 text.
     """
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    cached_schema_analysis = _get_or_create_cached_schema_analysis(
-        resolved_schema_directory_path
+    cached_scheme_analysis = _get_or_create_cached_scheme_analysis(
+        resolved_scheme_directory_path
     )
-    return cached_schema_analysis.allele_counts.invalid_allele_count
+    return cached_scheme_analysis.allele_counts.invalid_allele_count
 
 
 def count_alleles_below_minimum_length(
-    schema_directory_path: str | Path,
+    scheme_directory_path: str | Path,
     minimum_sequence_length: int,
 ) -> int:
     """Count alleles shorter than a specified nucleotide length.
 
     This focused function only evaluates sequence lengths. It is useful for
     reactive interfaces where the threshold changes independently of the
-    schema and the other validation metrics should not be recalculated.
+    scheme and the other validation metrics should not be recalculated.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
         minimum_sequence_length: Minimum accepted allele length in nucleotides.
             The value must be zero or greater.
 
@@ -936,8 +991,8 @@ def count_alleles_below_minimum_length(
         The number of alleles shorter than ``minimum_sequence_length``.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         OSError: If an allele file cannot be read or decompressed.
         UnicodeError: If an allele file is not valid UTF-8 text.
         ValueError: If ``minimum_sequence_length`` is negative.
@@ -945,41 +1000,41 @@ def count_alleles_below_minimum_length(
     if minimum_sequence_length < 0:
         raise ValueError("minimum_sequence_length cannot be negative")
 
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    cached_schema_analysis = _get_or_create_cached_schema_analysis(
-        resolved_schema_directory_path
+    cached_scheme_analysis = _get_or_create_cached_scheme_analysis(
+        resolved_scheme_directory_path
     )
     return sum(
         allele_length < minimum_sequence_length
-        for allele_length in cached_schema_analysis.allele_counts.allele_lengths
+        for allele_length in cached_scheme_analysis.allele_counts.allele_lengths
     )
 
 
-def get_schema_information(
-    schema_directory_path: str | Path,
+def get_scheme_information(
+    scheme_directory_path: str | Path,
     minimum_sequence_length: int = 0,
-) -> SchemaInformation:
-    """Collect locus and allele counts for an extracted schema directory.
+) -> SchemeInformation:
+    """Collect locus and allele counts for an extracted scheme directory.
 
     The first call scans the directory and persists the static metrics and
     allele lengths. Later calls reuse that analysis, including when only the
     minimum sequence length changes.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
         minimum_sequence_length: Minimum accepted allele length in nucleotides.
             Alleles shorter than this value are counted separately. The value
             must be zero or greater.
 
     Returns:
-        An immutable :class:`SchemaInformation` containing all scheme-level
+        An immutable :class:`SchemeInformation` containing all scheme-level
         counts and percentages.
 
     Raises:
-        FileNotFoundError: If ``schema_directory_path`` does not exist.
-        NotADirectoryError: If ``schema_directory_path`` is not a directory.
+        FileNotFoundError: If ``scheme_directory_path`` does not exist.
+        NotADirectoryError: If ``scheme_directory_path`` is not a directory.
         OSError: If an allele file cannot be read or decompressed.
         UnicodeError: If an allele file is not valid UTF-8 text.
         ValueError: If ``minimum_sequence_length`` is negative.
@@ -987,13 +1042,13 @@ def get_schema_information(
     if minimum_sequence_length < 0:
         raise ValueError("minimum_sequence_length cannot be negative")
 
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    cached_schema_analysis = _get_or_create_cached_schema_analysis(
-        resolved_schema_directory_path
+    cached_scheme_analysis = _get_or_create_cached_scheme_analysis(
+        resolved_scheme_directory_path
     )
-    allele_counts = cached_schema_analysis.allele_counts
+    allele_counts = cached_scheme_analysis.allele_counts
     alleles_below_minimum_length_count = sum(
         allele_length < minimum_sequence_length
         for allele_length in allele_counts.allele_lengths
@@ -1003,12 +1058,12 @@ def get_schema_information(
         alleles_above_locus_mode_threshold_percentage = 0.0
     else:
         alleles_below_locus_mode_threshold_percentage = (
-            cached_schema_analysis.alleles_below_locus_mode_threshold_count
+            cached_scheme_analysis.alleles_below_locus_mode_threshold_count
             / allele_counts.allele_count
             * 100
         )
         alleles_above_locus_mode_threshold_percentage = (
-            cached_schema_analysis.alleles_above_locus_mode_threshold_count
+            cached_scheme_analysis.alleles_above_locus_mode_threshold_count
             / allele_counts.allele_count
             * 100
         )
@@ -1024,8 +1079,8 @@ def get_schema_information(
         ),
     )
 
-    return SchemaInformation(
-        locus_count=cached_schema_analysis.locus_count,
+    return SchemeInformation(
+        locus_count=cached_scheme_analysis.locus_count,
         allele_count=allele_counts.allele_count,
         valid_allele_count=allele_counts.valid_allele_count,
         invalid_allele_count=allele_counts.invalid_allele_count,
@@ -1042,10 +1097,10 @@ def get_schema_information(
         alleles_below_minimum_length_count=alleles_below_minimum_length_count,
         minimum_sequence_length=minimum_sequence_length,
         alleles_below_locus_mode_threshold_count=(
-            cached_schema_analysis.alleles_below_locus_mode_threshold_count
+            cached_scheme_analysis.alleles_below_locus_mode_threshold_count
         ),
         alleles_above_locus_mode_threshold_count=(
-            cached_schema_analysis.alleles_above_locus_mode_threshold_count
+            cached_scheme_analysis.alleles_above_locus_mode_threshold_count
         ),
         alleles_below_locus_mode_threshold_percentage=(
             alleles_below_locus_mode_threshold_percentage
@@ -1074,12 +1129,12 @@ def _parse_non_negative_integer(argument_value: str) -> int:
 
 
 def main() -> None:
-    """Parse command-line arguments and print schema information."""
+    """Parse command-line arguments and print scheme information."""
     argument_parser = argparse.ArgumentParser(
         description="Count loci and alleles in an extracted MLST scheme."
     )
     argument_parser.add_argument(
-        "schema_directory",
+        "scheme_directory",
         type=Path,
         help="directory containing an extracted MLST scheme",
     )
@@ -1099,67 +1154,67 @@ def main() -> None:
     )
     command_line_arguments = argument_parser.parse_args()
 
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        command_line_arguments.schema_directory
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        command_line_arguments.scheme_directory
     )
-    schema_information = get_schema_information(
-        resolved_schema_directory_path,
+    scheme_information = get_scheme_information(
+        resolved_scheme_directory_path,
         minimum_sequence_length=command_line_arguments.minimum_sequence_length,
     )
 
     if command_line_arguments.print_json:
         json_output = {
-            "schema_directory": str(resolved_schema_directory_path),
-            **asdict(schema_information),
+            "scheme_directory": str(resolved_scheme_directory_path),
+            **asdict(scheme_information),
         }
         print(json.dumps(json_output, indent=2, sort_keys=True))
         return
 
-    print(f"Schema directory: {resolved_schema_directory_path}")
-    print(f"Loci: {schema_information.locus_count}")
-    print(f"Alleles: {schema_information.allele_count}")
-    print(f"Valid alleles: {schema_information.valid_allele_count}")
-    print(f"Invalid alleles: {schema_information.invalid_allele_count}")
-    print(f"Incomplete ORF: {schema_information.incomplete_orf_allele_count}")
-    print(f"Ambiguous bases: {schema_information.ambiguous_bases_allele_count}")
+    print(f"Scheme directory: {resolved_scheme_directory_path}")
+    print(f"Loci: {scheme_information.locus_count}")
+    print(f"Alleles: {scheme_information.allele_count}")
+    print(f"Valid alleles: {scheme_information.valid_allele_count}")
+    print(f"Invalid alleles: {scheme_information.invalid_allele_count}")
+    print(f"Incomplete ORF: {scheme_information.incomplete_orf_allele_count}")
+    print(f"Ambiguous bases: {scheme_information.ambiguous_bases_allele_count}")
     print(
         "Missing start/stop codon: "
-        f"{schema_information.missing_start_or_stop_codon_allele_count}"
+        f"{scheme_information.missing_start_or_stop_codon_allele_count}"
     )
     print(
         "In-frame stop codon: "
-        f"{schema_information.in_frame_stop_codon_allele_count}"
+        f"{scheme_information.in_frame_stop_codon_allele_count}"
     )
     guanine_cytosine_content_label = (
         "unavailable"
-        if schema_information.guanine_cytosine_content_percentage is None
-        else f"{schema_information.guanine_cytosine_content_percentage:.2f}%"
+        if scheme_information.guanine_cytosine_content_percentage is None
+        else f"{scheme_information.guanine_cytosine_content_percentage:.2f}%"
     )
     print(f"GC content: {guanine_cytosine_content_label}")
     print(
         "Canonical bases in GC denominator: "
-        f"{schema_information.canonical_nucleotide_base_count}"
+        f"{scheme_information.canonical_nucleotide_base_count}"
     )
     print(
         "Noncanonical bases excluded from GC denominator: "
-        f"{schema_information.excluded_nucleotide_base_count}"
+        f"{scheme_information.excluded_nucleotide_base_count}"
     )
     print(
-        f"Alleles <{schema_information.minimum_sequence_length} bp: "
-        f"{schema_information.alleles_below_minimum_length_count}"
+        f"Alleles <{scheme_information.minimum_sequence_length} bp: "
+        f"{scheme_information.alleles_below_minimum_length_count}"
     )
     print(
         "Alleles <80% of locus mode: "
-        f"{schema_information.alleles_below_locus_mode_threshold_count} "
+        f"{scheme_information.alleles_below_locus_mode_threshold_count} "
         "("
-        f"{schema_information.alleles_below_locus_mode_threshold_percentage:.2f}%"
+        f"{scheme_information.alleles_below_locus_mode_threshold_percentage:.2f}%"
         ")"
     )
     print(
         "Alleles >120% of locus mode: "
-        f"{schema_information.alleles_above_locus_mode_threshold_count} "
+        f"{scheme_information.alleles_above_locus_mode_threshold_count} "
         "("
-        f"{schema_information.alleles_above_locus_mode_threshold_percentage:.2f}%"
+        f"{scheme_information.alleles_above_locus_mode_threshold_percentage:.2f}%"
         ")"
     )
 

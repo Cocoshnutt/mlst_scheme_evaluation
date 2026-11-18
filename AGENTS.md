@@ -4,7 +4,9 @@ Use this file to acquire the repository context quickly without reading the
 scheme archives, generated caches, or lock file. This is a Marimo-based MLST
 and cgMLST scheme evaluator. It extracts a selected archive, calculates
 scheme-wide and per-locus FASTA metrics, caches expensive static analysis, and
-renders the results in `notebook.py`.
+renders intrinsic results in `notebooks/intrinsic.py`. The separate
+`notebooks/functional.py` application validates Phase 2 representative-genome
+manifests but does not yet run genome-dependent analyses.
 
 ## Fast context bootstrap
 
@@ -27,20 +29,27 @@ usually sufficient before reading implementations:
 
 ```console
 rg -n '^(class |def |async def |[A-Z][A-Z0-9_]+\s*=|__all__|@app\.cell)' \
-  schema/cache.py schema/info.py schema/stats.py schema/allele_info.py \
-  schema/alignment.py schema/similarity.py schema/bsr.py notebook.py
+  scheme/cache.py scheme/info.py scheme/stats.py scheme/allele_info.py \
+  scheme/alignment.py scheme/similarity.py scheme/bsr.py scheme/overview.py \
+  scheme/resources.py scheme/static_analysis.py functional/manifest.py \
+  notebooks/intrinsic.py notebooks/functional.py
 ```
 
 | Task | Read first | Main public API |
 | --- | --- | --- |
-| Archive extraction or clearing | `schema/cache.py` | `cache_archive`, `clear_cache` |
-| Scheme-wide sequence metrics | `schema/info.py` | `get_schema_information` and count helpers |
-| Locus distributions and charts | `schema/stats.py` | `get_schema_statistics`, `create_schema_statistics_charts` |
-| Per-locus allele table | `schema/allele_info.py` | `get_scheme_allele_information` |
-| Within-locus alignments | `schema/alignment.py` | `get_schema_alignment_analysis`, `calculate_schema_alignment_summary` |
-| Cross-locus similarity | `schema/similarity.py` | `get_schema_similarity_analysis` |
-| Representative-to-allele protein BSR | `schema/bsr.py` | `get_schema_representative_bsr_analysis`, `classify_representative_bsr_analysis` |
-| UI, controls, or layout | Relevant library plus `notebook.py` | Marimo cells |
+| Archive extraction or clearing | `scheme/cache.py` | `cache_archive`, `clear_cache` |
+| Scheme-wide sequence metrics | `scheme/info.py` | `get_scheme_information` and count helpers |
+| Locus distributions and charts | `scheme/stats.py` | `get_scheme_statistics`, `create_scheme_statistics_charts` |
+| Per-locus allele table | `scheme/allele_info.py` | `get_scheme_allele_information` |
+| Shared static FASTA cache | `scheme/static_analysis.py` | `get_shared_scheme_static_analysis` |
+| Within-locus alignments | `scheme/alignment.py` | `get_scheme_alignment_analysis`, `calculate_scheme_alignment_summary` |
+| Cross-locus similarity | `scheme/similarity.py` | `get_scheme_similarity_analysis` |
+| Representative-to-allele protein BSR | `scheme/bsr.py` | `get_scheme_representative_bsr_analysis`, `classify_representative_bsr_analysis` |
+| Progressive scheme overview | `scheme/overview.py` | `create_intrinsic_scheme_overview` |
+| Shared compute budget | `scheme/resources.py` | `get_available_cpu_count`, `calculate_default_worker_count`, `resolve_worker_count` |
+| Phase 2 genome manifests | `functional/manifest.py` | `load_genome_set_manifest`, `validate_genome_set_manifest` |
+| UI, controls, or layout | Relevant library plus `notebooks/intrinsic.py` | Marimo cells |
+| Phase 2 readiness UI | `notebooks/functional.py`, `docs/functional-workflow.md` | Manifest status only; no analyses yet |
 | Dependencies or development environment | `README.md`, `pyproject.toml`, `devenv.nix` | `uv sync --locked`; generated `environment.yml`; optional `devenv shell` |
 | Planned metrics and research criteria | `README.md` TODO | Treat thresholds as advisory flags |
 
@@ -50,58 +59,78 @@ rg -n '^(class |def |async def |[A-Z][A-Z0-9_]+\s*=|__all__|@app\.cell)' \
 archive/**/*.tar.*
         |
         v
-schema.cache.cache_archive()
+scheme.cache.cache_archive()
         |
         v
 .cache/schemes/<archive-name>-<12-character fingerprint>/
         |
-        +--> schema/info.py --------> scheme summary
-        +--> schema/stats.py -------> four Altair panels
-        +--> schema/allele_info.py -> searchable per-locus table
-        +--> schema/alignment.py ---> nucleotide/protein gap statistics
-        +--> schema/similarity.py --> nucleotide/protein cross-locus similarity
-        +--> schema/bsr.py ---------> representative coverage/high-BSR groups
+        +--> scheme/static_analysis.py -> one-pass static FASTA cache
+        |       +--> scheme/info.py --------> scheme summary
+        |       +--> scheme/stats.py -------> four Altair panels
+        |       +--> scheme/allele_info.py -> searchable per-locus table
+        +--> scheme/alignment.py ---> nucleotide/protein gap statistics
+        +--> scheme/similarity.py --> nucleotide/protein cross-locus similarity
+        +--> scheme/bsr.py ---------> representative coverage/high-BSR groups
+        +--> scheme/overview.py ----> progressive typed overview aggregation
+        +--> scheme/resources.py ---> shared MAFFT/BLAST worker budget
                                       |
                                       v
-                                  notebook.py
+                                  notebooks/intrinsic.py
 ```
 
 Keep analysis in importable library modules and presentation in
-`notebook.py`. Do not duplicate FASTA parsing or metric calculations in the
-notebook. When adding a substantial analysis, expose a typed public function
-and let the notebook consume its return value. Existing command-line entry
-points are available in `schema/cache.py`, `schema/info.py`,
-`schema/allele_info.py`, `schema/alignment.py`, `schema/similarity.py`, and
-`schema/bsr.py`.
+`notebooks/intrinsic.py`. Do not duplicate FASTA parsing or metric calculations
+in the notebook. When adding a substantial analysis, expose a typed public
+function and let the notebook consume its return value. Existing command-line
+entry points are available in `scheme/cache.py`, `scheme/info.py`,
+`scheme/allele_info.py`, `scheme/alignment.py`, `scheme/similarity.py`, and
+`scheme/bsr.py`.
 
 ### Module responsibilities
 
-- `schema/cache.py` validates and extracts tar archives atomically. Cache
+- `scheme/cache.py` validates and extracts tar archives atomically. Cache
   identity is based on the archive's resolved path, size, and modification
   time. A `.complete` marker distinguishes reusable extractions from partial
   work.
-- `schema/info.py` computes aggregate scheme metrics: loci, alleles, CDS
+- `scheme/info.py` computes aggregate scheme metrics: loci, alleles, CDS
   validity categories, configurable short-allele counts, scheme-wide 80%/120%
   modal-length outlier totals, and pooled scheme-wide GC content.
-- `schema/stats.py` computes per-locus allele-count, length, and GC-content
+- `scheme/stats.py` computes per-locus allele-count, length, and GC-content
   summaries, classifies configurable frequent length peaks from cached
   exact-length histograms, and builds the vertically stacked Altair charts.
-- `schema/allele_info.py` computes chewBBACA-style per-locus integrity and
+- `scheme/allele_info.py` computes chewBBACA-style per-locus integrity and
   diversity fields for the Marimo table.
-- `schema/alignment.py` runs cached, parallel MAFFT nucleotide and protein
+- `scheme/static_analysis.py` traverses each locus FASTA once and caches the
+  threshold-independent union needed by `info.py`, `stats.py`, and
+  `allele_info.py`. Those modules retain their public result types, CLIs, and
+  compatibility cache projections.
+- `scheme/alignment.py` runs cached, parallel MAFFT nucleotide and protein
   alignments and derives per-locus gap proportions without retaining full
   alignments.
-- `schema/similarity.py` selects one modal-length-proximal allele per locus,
+- `scheme/similarity.py` selects one modal-length-proximal allele per locus,
   runs cached nucleotide and protein BLAST searches, and derives directional
   inter-locus identity, coverage, and BSR measurements. It also collapses
   reciprocal hits into unique candidate-paralog locus pairs using separately
   configurable literature screening values.
-- `schema/bsr.py` selects the same modal-length-proximal valid CDS as an
+- `scheme/bsr.py` selects the same modal-length-proximal valid CDS as an
   approximate representative, searches all selected representatives against
   all valid translated alleles in one cached BLASTp analysis, and reports
   within-locus coverage plus connected inter-locus high-BSR similarity groups.
-- `notebook.py` owns selection, status notices, the minimum-length control,
-  display formatting, charts, the allele table, and the clear-cache action.
+- `scheme/overview.py` aggregates existing static and optional expensive-stage
+  typed results for the progressive notebook overview. It does not read FASTA
+  files, invoke tools, or own an analysis cache.
+- `scheme/resources.py` provides the shared process-visible CPU count and the
+  conservative default used by MAFFT and both BLAST analyses. Explicit
+  positive library and CLI overrides remain authoritative.
+- `functional/manifest.py` loads versioned representative-genome TOML
+  manifests, calculates their SHA-256 identity, and separates blocking input
+  errors from non-blocking provenance warnings.
+- `notebooks/intrinsic.py` owns selection, status notices, the minimum-length
+  control, explicit expensive-stage run controls, display formatting, charts,
+  the allele table, and the clear-cache action.
+- `notebooks/functional.py` is the Phase 2 entry point. Until real allele-call
+  formats are defined, it validates genome manifests and explains pending
+  requirements without fabricating calculations or result controls.
 - `README.md` documents use and contains the phased analysis roadmap. Preserve
   the distinction between intrinsic FASTA-only quality and genome-dependent
   functional performance.
@@ -111,10 +140,10 @@ points are available in `schema/cache.py`, `schema/info.py`,
 Preserve these unless the user explicitly requests a semantic change:
 
 - Python is `>=3.14,<3.15`; modern syntax such as `type` aliases is expected.
-- Recognized FASTA suffixes are defined once in `schema/info.py`, including
+- Recognized FASTA suffixes are defined once in `scheme/info.py`, including
   gzip-compressed variants.
 - Library scanners currently treat every recognized FASTA file below an
-  extracted schema recursively as a locus. The current scheme collection has
+  extracted scheme recursively as a locus. The current scheme collection has
   no `short/` directories. Supporting curated representatives in future
   inputs remains a separate TODO, not current special behavior.
 - BUSCO archives under `archive/BUSCO_bac/` remain on disk but are deliberately
@@ -202,16 +231,21 @@ Preserve these unless the user explicitly requests a semantic change:
   fastest strategy with a rougher guide tree; Auto may select slower iterative
   methods. Strategy choice can change the alignment and measured gap
   proportions, so always report it with results.
+- Expensive analyses default to 80% of CPUs visible to the process, rounded
+  down to an even count when possible with a one-worker floor. The notebook
+  exposes one shared override; the CLIs retain explicit `--workers` or
+  `--threads` overrides. Worker budgets affect scheduling rather than
+  scientific cache identity.
 - Each MAFFT subprocess uses one thread while loci are scheduled concurrently
-  across the CPUs available to the process. Inputs with at least two eligible,
-  exactly identical sequences use an exact zero-gap fast path.
+  within that shared worker budget. Inputs with at least two eligible, exactly
+  identical sequences use an exact zero-gap fast path.
 - Nucleotide polymorphism is substitution-only. A nucleotide MSA column is
   callable when at least two sequences contain canonical A/C/G/T observations
   after treating gaps and ambiguous IUPAC symbols as missing. It is
   polymorphic when those observations contain at least two distinct bases;
   percentage is polymorphic sites divided by callable sites. Indel variation
   remains in the separate gap metrics.
-- Keep Altair datasets limited to fields actually plotted. Large-schema tables
+- Keep Altair datasets limited to fields actually plotted. Large-scheme tables
   must report complete counts but use bounded previews for potentially long
   collections; the locus-length table currently previews at most ten tied
   modes or frequent peaks per locus. Do not raise Marimo's output-size limit to
@@ -220,18 +254,32 @@ Preserve these unless the user explicitly requests a semantic change:
 ## Cache model
 
 The extraction cache root is `.cache/schemes`. Each extracted archive contains
-independent JSON analysis caches:
+versioned JSON analysis caches:
 
 | File | Owner | Invalidation |
 | --- | --- | --- |
-| `.schema-information-cache.json` | `schema/info.py` | Cache version; extracted archives are treated as immutable |
-| `.schema-statistics-cache.json` | `schema/stats.py` | Cache version plus FASTA path/size/mtime signature |
-| `.scheme-allele-information-cache.json` | `schema/allele_info.py` | Cache version plus FASTA path/size/mtime signature |
-| `.schema-alignment-cache.json` | `schema/alignment.py` | Cache version, MAFFT version, strategy, and per-locus FASTA path/size/mtime signature |
-| `.schema-similarity-cache.json` | `schema/similarity.py` | Cache version, BLAST versions, method, E-value, and FASTA path/size/mtime signature |
-| `.schema-representative-bsr-cache.json` | `schema/bsr.py` | Cache version, BLASTp version, method, E-value, and FASTA path/size/mtime signature |
+| `.scheme-static-analysis-cache.json` | `scheme/static_analysis.py` | Cache version plus FASTA path/size/mtime signature |
+| `.scheme-information-cache.json` | `scheme/info.py` | Cache version; extracted archives are treated as immutable |
+| `.scheme-statistics-cache.json` | `scheme/stats.py` | Cache version plus FASTA path/size/mtime signature |
+| `.scheme-allele-information-cache.json` | `scheme/allele_info.py` | Cache version plus FASTA path/size/mtime signature |
+| `.scheme-alignment-cache.json` | `scheme/alignment.py` | Cache version, MAFFT version, strategy, and per-locus FASTA path/size/mtime signature |
+| `.scheme-similarity-cache.json` | `scheme/similarity.py` | Cache version, BLAST versions, method, E-value, and FASTA path/size/mtime signature |
+| `.scheme-representative-bsr-cache.json` | `scheme/bsr.py` | Cache version, BLASTp version, method, E-value, and FASTA path/size/mtime signature |
 
-The schema-information cache is currently version 4 and the schema-statistics
+Legacy `.schema-*-cache.json` analysis files remain readable after the package
+terminology migration. New results are written only to the corresponding
+`.scheme-*-cache.json` filename.
+
+The shared static cache is version 1. It stores the one-pass,
+threshold-independent union of sequence lengths, base counts, CDS-validation
+counts, distinct translated-protein counts, exact-length frequencies, and
+locus distribution statistics. Existing information, statistics, and allele
+information caches are read first and remain compatibility projections. A
+cold request with no compatible projection builds the shared cache; subsequent
+missing projections must reuse it rather than rescan FASTA files. See
+`docs/static-analysis-cache.md` for the benchmark and decision record.
+
+The scheme-information cache is currently version 4 and the scheme-statistics
 cache is currently version 3; these versions add the raw nucleotide counts
 needed to reuse scheme-wide and per-locus GC-content calculations.
 
@@ -258,28 +306,52 @@ version. Keep writes atomic with a temporary file followed by replacement.
 Failure to write a cache should not prevent analysis of a readable scheme.
 Do not commit `.cache/` contents.
 
-The schema-statistics cache v2 stores threshold-independent exact-length
+The scheme-statistics cache v2 stores threshold-independent exact-length
 frequency histograms. Frequent-peak threshold changes must reuse these
 histograms instead of invalidating the cache or rescanning FASTA files.
 
 ## Marimo conventions
 
 Marimo derives dependencies from cell parameters and returned names. When
-editing `notebook.py`:
+editing `notebooks/intrinsic.py`:
 
 - Return every value consumed by another cell and include it as a parameter in
   the consumer.
 - Avoid defining the same global name in multiple cells.
 - Keep expensive, threshold-independent work in a separate cell from reactive
   controls.
+- Keep static scheme, locus, and allele analyses automatic. Gate MAFFT and
+  BLAST computation cells with their individual run buttons and the shared
+  complete-evaluation run button; do not make one independent analysis wait
+  for another section merely to preserve display order.
+- Expensive computation cells must expose an explicit pending value so the
+  top-level overview can render before those stages run. The overview must not
+  trigger MAFFT or BLAST merely because it appears first.
+- Add scheme-wide measurements from a new analysis to `scheme/overview.py` and
+  keep its detailed evidence and interpretation in the analysis section.
+- Use actual result dependencies for derived classifications. Do not recreate
+  `*_displayed` or `*_section_ready` proxy chains between notebook sections.
 - Add a library module to the first cell's `mo.watch.file(...)` and reload flow
   when the notebook must hot-reload it during editing.
-- Update `analysis_cache_filenames` when adding a persistent analysis cache so
-  the initial-computation notice remains accurate.
+- Update `analysis_cache_filename_groups` when adding a persistent analysis
+  cache so the initial-computation notice remains accurate, including any
+  legacy read-only filename accepted during a migration.
 - Build table rows explicitly and keep column widths/tooltips in sync with
   added fields; wide automatic headers have previously broken the table.
 - Keep user-facing sections clearly separated and keep all primary plots at a
   consistent width unless a compact selector intentionally differs.
+
+For `notebooks/functional.py`:
+
+- Keep its cache and execution flow independent from the intrinsic notebook.
+- Do not add a run control until at least one real genome manifest and a typed
+  allele-call importer exist.
+- Preserve distinct missing, absent, partial, multicopy, tool-failure,
+  excluded, and unevaluated states in future result types.
+- Join later reports by stable scheme, genome, and locus identifiers rather
+  than importing one notebook from another.
+- Treat `.cache/functional/` as an implementation detail; publish documented
+  open result artifacts instead.
 
 ## Implementation style
 
@@ -324,17 +396,22 @@ Run the smallest relevant checks first. The baseline static validation is:
 ```console
 uv run --locked python scripts/sync_conda_environment.py --check
 uv run --locked python -m py_compile \
-  schema/cache.py schema/info.py schema/stats.py schema/allele_info.py \
-  schema/alignment.py schema/similarity.py schema/bsr.py notebook.py
+  scheme/cache.py scheme/info.py scheme/stats.py scheme/allele_info.py \
+  scheme/alignment.py scheme/similarity.py scheme/bsr.py scheme/overview.py \
+  scheme/resources.py scheme/static_analysis.py functional/manifest.py \
+  notebooks/intrinsic.py notebooks/functional.py
 uv run --locked ruff check \
-  schema/cache.py schema/info.py schema/stats.py schema/allele_info.py \
-  schema/alignment.py schema/similarity.py schema/bsr.py notebook.py
+  scheme/cache.py scheme/info.py scheme/stats.py scheme/allele_info.py \
+  scheme/alignment.py scheme/similarity.py scheme/bsr.py scheme/overview.py \
+  scheme/resources.py scheme/static_analysis.py functional/manifest.py \
+  notebooks/intrinsic.py notebooks/functional.py
 ```
 
 For notebook changes, also run:
 
 ```console
-uv run --locked marimo check notebook.py
+uv run --locked marimo check notebooks/intrinsic.py
+uv run --locked marimo check notebooks/functional.py
 ```
 
 `marimo check` has occasionally stalled in this environment. Do not report it
@@ -345,12 +422,12 @@ For library changes, add focused temporary-directory tests or exercise the
 relevant CLI without modifying a real archive:
 
 ```console
-uv run --locked python -m schema.cache --help
-uv run --locked python -m schema.info --help
-uv run --locked python -m schema.allele_info --help
-uv run --locked python -m schema.alignment --help
-uv run --locked python -m schema.bsr --help
-uv run --locked python -m schema.similarity --help
+uv run --locked python -m scheme.cache --help
+uv run --locked python -m scheme.info --help
+uv run --locked python -m scheme.allele_info --help
+uv run --locked python -m scheme.alignment --help
+uv run --locked python -m scheme.bsr --help
+uv run --locked python -m scheme.similarity --help
 ```
 
 After validation, inspect `git status --short` again and report only files and

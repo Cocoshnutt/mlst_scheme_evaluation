@@ -11,8 +11,8 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import call, patch
 
-from schema import alignment
-from schema.alignment import (
+from scheme import alignment
+from scheme.alignment import (
     ALIGNMENT_METHOD_IDENTIFIER,
     ALIGNMENT_METHOD_IDENTIFIERS,
     ALIGNMENT_STATUS_ALIGNED,
@@ -21,18 +21,19 @@ from schema.alignment import (
     ALIGNMENT_STRATEGY_AUTO,
     ALIGNMENT_STRATEGY_FFT_NS_1,
     ALIGNMENT_STRATEGY_FFT_NS_2,
-    SCHEMA_ALIGNMENT_CACHE_FILENAME,
-    SCHEMA_ALIGNMENT_CACHE_VERSION,
+    SCHEME_ALIGNMENT_CACHE_FILENAME,
+    SCHEME_ALIGNMENT_CACHE_FILENAMES,
+    SCHEME_ALIGNMENT_CACHE_VERSION,
     AlignmentProgress,
     LocusAlignmentStatistics,
-    SchemaAlignmentAnalysis,
+    SchemeAlignmentAnalysis,
     _AlignmentMetrics,
     _calculate_gap_metrics_from_aligned_sequences,
     _calculate_nucleotide_polymorphism_metrics,
     _get_mafft_strategy_arguments,
     _run_mafft_alignment,
-    calculate_schema_alignment_summary,
-    get_schema_alignment_analysis,
+    calculate_scheme_alignment_summary,
+    get_scheme_alignment_analysis,
 )
 
 
@@ -174,7 +175,7 @@ class AlignmentMetricTest(unittest.TestCase):
             with (
                 self.subTest(alignment_strategy=alignment_strategy),
                 patch(
-                    "schema.alignment.subprocess.run",
+                    "scheme.alignment.subprocess.run",
                     return_value=successful_process,
                 ) as subprocess_run,
             ):
@@ -196,7 +197,7 @@ class AlignmentMetricTest(unittest.TestCase):
     def test_unsupported_strategy_is_rejected(self) -> None:
         """Reject misspelled strategies before invoking MAFFT."""
         with (
-            patch("schema.alignment.subprocess.run") as subprocess_run,
+            patch("scheme.alignment.subprocess.run") as subprocess_run,
             self.assertRaisesRegex(ValueError, "alignment_strategy"),
         ):
             _run_mafft_alignment(
@@ -209,7 +210,7 @@ class AlignmentMetricTest(unittest.TestCase):
 
     def test_less_than_two_sequences_is_unavailable(self) -> None:
         """Do not report a misleading zero for a non-comparative locus."""
-        with patch("schema.alignment.subprocess.run") as subprocess_run:
+        with patch("scheme.alignment.subprocess.run") as subprocess_run:
             alignment_metrics = _run_mafft_alignment(
                 ("ATGTAA",),
                 sequence_type="nucleotide",
@@ -231,7 +232,7 @@ class AlignmentMetricTest(unittest.TestCase):
         ):
             with (
                 self.subTest(sequence_type=sequence_type),
-                patch("schema.alignment.subprocess.run") as subprocess_run,
+                patch("scheme.alignment.subprocess.run") as subprocess_run,
             ):
                 alignment_metrics = _run_mafft_alignment(
                     (sequence, sequence, sequence),
@@ -265,12 +266,12 @@ class AlignmentMetricTest(unittest.TestCase):
     def test_empty_locus_is_unavailable_for_both_alignments(self) -> None:
         """Report an empty FASTA locus without invoking MAFFT."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            allele_file_path = schema_directory_path / "empty.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            allele_file_path = scheme_directory_path / "empty.fasta"
             allele_file_path.write_text("", encoding="utf-8")
-            with patch("schema.alignment.subprocess.run") as subprocess_run:
+            with patch("scheme.alignment.subprocess.run") as subprocess_run:
                 locus_statistics = alignment._analyze_locus(
-                    schema_directory_path,
+                    scheme_directory_path,
                     allele_file_path,
                     "mafft",
                 )
@@ -288,8 +289,8 @@ class AlignmentMetricTest(unittest.TestCase):
     def test_locus_eligibility_and_duplicate_record_inclusion(self) -> None:
         """Apply the approved nucleotide and valid-CDS inclusion rules."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            allele_file_path = schema_directory_path / "locus.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            allele_file_path = scheme_directory_path / "locus.fasta"
             allele_file_path.write_text(
                 (
                     ">locus_1\nATGAAATAA\n"
@@ -310,11 +311,11 @@ class AlignmentMetricTest(unittest.TestCase):
             )
 
             with patch(
-                "schema.alignment._run_mafft_alignment",
+                "scheme.alignment._run_mafft_alignment",
                 return_value=aligned_metrics,
             ) as run_mafft_alignment:
                 locus_statistics = alignment._analyze_locus(
-                    schema_directory_path,
+                    scheme_directory_path,
                     allele_file_path,
                     "mafft",
                 )
@@ -355,7 +356,7 @@ class AlignmentMetricTest(unittest.TestCase):
             stdout="",
             stderr="alignment failed",
         )
-        with patch("schema.alignment.subprocess.run", return_value=failed_process):
+        with patch("scheme.alignment.subprocess.run", return_value=failed_process):
             alignment_metrics = _run_mafft_alignment(
                 ("ATGTAA", "ATGAAATAA"),
                 sequence_type="nucleotide",
@@ -368,7 +369,7 @@ class AlignmentMetricTest(unittest.TestCase):
 
     def test_warning_threshold_is_strict_and_uses_aligned_loci(self) -> None:
         """Flag only values greater than the advisory threshold."""
-        alignment_analysis = SchemaAlignmentAnalysis(
+        alignment_analysis = SchemeAlignmentAnalysis(
             mafft_version="test",
             alignment_method_identifier=ALIGNMENT_METHOD_IDENTIFIER,
             locus_statistics=(
@@ -391,7 +392,7 @@ class AlignmentMetricTest(unittest.TestCase):
             ),
         )
 
-        alignment_summary = calculate_schema_alignment_summary(
+        alignment_summary = calculate_scheme_alignment_summary(
             alignment_analysis,
             amino_acid_gap_warning_threshold_percentage=5.0,
         )
@@ -413,20 +414,20 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_strategies_have_independent_reusable_cache_entries(self) -> None:
         """Keep completed work when switching strategies and switching back."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "locus.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "locus.fasta").write_text(
                 ">locus_1\nATGTAA\n>locus_2\nATGAAATAA\n",
                 encoding="utf-8",
             )
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
-                    side_effect=lambda schema_path, allele_path, executable, strategy, cached: (
+                    "scheme.alignment._analyze_locus",
+                    side_effect=lambda scheme_path, allele_path, executable, strategy, cached: (
                         _make_locus_statistics(
                             allele_path.stem,
                             nucleotide_gap_percentage=(
@@ -436,14 +437,14 @@ class AlignmentCacheTest(unittest.TestCase):
                     ),
                 ) as analyze_locus,
             ):
-                fft_ns_2_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                fft_ns_2_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     alignment_strategy=ALIGNMENT_STRATEGY_FFT_NS_2,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
-                fft_ns_1_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                fft_ns_1_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     alignment_strategy=ALIGNMENT_STRATEGY_FFT_NS_1,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
@@ -451,23 +452,23 @@ class AlignmentCacheTest(unittest.TestCase):
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     side_effect=AssertionError("MAFFT version was requested"),
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     side_effect=AssertionError("locus was realigned"),
                 ),
             ):
-                reused_fft_ns_2_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                reused_fft_ns_2_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     alignment_strategy=ALIGNMENT_STRATEGY_FFT_NS_2,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
             cached_data = json.loads(
-                (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).read_text(
+                (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).read_text(
                     encoding="utf-8"
                 )
             )
@@ -491,40 +492,46 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_cache_reuse_does_not_require_mafft(self) -> None:
         """Load derived metrics without rerunning or locating the aligner."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "locus.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "locus.fasta").write_text(
                 ">locus_1\nATGTAA\n>locus_2\nATGAAATAA\n",
                 encoding="utf-8",
             )
             expected_locus_statistics = _make_locus_statistics("locus")
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=expected_locus_statistics,
                 ),
             ):
-                initial_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                initial_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
+            legacy_cache_file_path = (
+                scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAMES[1]
+            )
+            (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).replace(
+                legacy_cache_file_path
+            )
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     side_effect=AssertionError("MAFFT version was requested"),
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     side_effect=AssertionError("locus was realigned"),
                 ),
             ):
-                cached_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                cached_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -537,7 +544,7 @@ class AlignmentCacheTest(unittest.TestCase):
             tempfile.TemporaryDirectory() as temporary_directory,
             self.assertRaisesRegex(ValueError, "at least one"),
         ):
-            get_schema_alignment_analysis(
+            get_scheme_alignment_analysis(
                 temporary_directory,
                 maximum_parallel_loci=0,
                 progress_output_stream=None,
@@ -546,8 +553,8 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_source_change_invalidates_cached_alignment_metrics(self) -> None:
         """Realign when a locus FASTA path, size, or modification time changes."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            allele_file_path = schema_directory_path / "locus.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            allele_file_path = scheme_directory_path / "locus.fasta"
             allele_file_path.write_text(
                 ">locus_1\nATGTAA\n>locus_2\nATGAAATAA\n",
                 encoding="utf-8",
@@ -559,16 +566,16 @@ class AlignmentCacheTest(unittest.TestCase):
             )
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=initial_locus_statistics,
                 ),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -579,16 +586,16 @@ class AlignmentCacheTest(unittest.TestCase):
             )
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=changed_locus_statistics,
                 ) as analyze_locus,
             ):
-                changed_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                changed_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -602,25 +609,25 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_only_changed_and_added_loci_are_analyzed(self) -> None:
         """Reuse unchanged entries while processing changed and new loci."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            alpha_path = schema_directory_path / "alpha.fasta"
-            beta_path = schema_directory_path / "beta.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            alpha_path = scheme_directory_path / "alpha.fasta"
+            beta_path = scheme_directory_path / "beta.fasta"
             alpha_path.write_text(">a1\nATGTAA\n>a2\nATGAAATAA\n", encoding="utf-8")
             beta_path.write_text(">b1\nATGTAA\n>b2\nATGAAATAA\n", encoding="utf-8")
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
-                    side_effect=lambda schema_path, allele_path, executable, strategy, cached: (
+                    "scheme.alignment._analyze_locus",
+                    side_effect=lambda scheme_path, allele_path, executable, strategy, cached: (
                         _make_locus_statistics(allele_path.stem)
                     ),
                 ),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -629,25 +636,25 @@ class AlignmentCacheTest(unittest.TestCase):
                 ">b1\nATGTAA\n>b2\nATGAAATAA\n>b3\nATGAAA\n",
                 encoding="utf-8",
             )
-            gamma_path = schema_directory_path / "gamma.fasta"
+            gamma_path = scheme_directory_path / "gamma.fasta"
             gamma_path.write_text(
                 ">g1\nATGTAA\n>g2\nATGAAATAA\n",
                 encoding="utf-8",
             )
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
-                    side_effect=lambda schema_path, allele_path, executable, strategy, cached: (
+                    "scheme.alignment._analyze_locus",
+                    side_effect=lambda scheme_path, allele_path, executable, strategy, cached: (
                         _make_locus_statistics(allele_path.stem)
                     ),
                 ) as analyze_locus,
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -670,49 +677,49 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_deleted_locus_is_removed_without_realigning(self) -> None:
         """Clean obsolete entries while reusing all remaining current loci."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
+            scheme_directory_path = Path(temporary_directory)
             for locus_name in ("alpha", "beta"):
-                (schema_directory_path / f"{locus_name}.fasta").write_text(
+                (scheme_directory_path / f"{locus_name}.fasta").write_text(
                     ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                     encoding="utf-8",
                 )
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
-                    side_effect=lambda schema_path, allele_path, executable, strategy, cached: (
+                    "scheme.alignment._analyze_locus",
+                    side_effect=lambda scheme_path, allele_path, executable, strategy, cached: (
                         _make_locus_statistics(allele_path.stem)
                     ),
                 ),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
-            (schema_directory_path / "beta.fasta").unlink()
+            (scheme_directory_path / "beta.fasta").unlink()
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     side_effect=AssertionError("MAFFT version was requested"),
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     side_effect=AssertionError("a locus was realigned"),
                 ),
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
             cached_data = json.loads(
-                (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).read_text(
+                (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).read_text(
                     encoding="utf-8"
                 )
             )
@@ -732,8 +739,8 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_failed_locus_is_retried_on_next_call(self) -> None:
         """Do not treat a tool failure as a reusable biological result."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "locus.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "locus.fasta").write_text(
                 ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                 encoding="utf-8",
             )
@@ -744,32 +751,32 @@ class AlignmentCacheTest(unittest.TestCase):
             )
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=failed_statistics,
                 ),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=_make_locus_statistics("locus"),
                 ) as analyze_locus,
             ):
-                retried_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                retried_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -783,16 +790,16 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_interrupted_run_checkpoints_completed_locus(self) -> None:
         """Resume after an exception without repeating completed locus work."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
+            scheme_directory_path = Path(temporary_directory)
             for locus_name in ("alpha", "beta"):
-                (schema_directory_path / f"{locus_name}.fasta").write_text(
+                (scheme_directory_path / f"{locus_name}.fasta").write_text(
                     ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                     encoding="utf-8",
                 )
             alpha_progress_reported = Event()
 
             def analyze_then_fail(
-                schema_path, allele_path, executable, strategy, cached
+                scheme_path, allele_path, executable, strategy, cached
             ):
                 if allele_path.stem == "alpha":
                     return _make_locus_statistics("alpha")
@@ -805,17 +812,17 @@ class AlignmentCacheTest(unittest.TestCase):
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     side_effect=analyze_then_fail,
                 ),
                 self.assertRaisesRegex(RuntimeError, "interrupted test run"),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                     progress_callback=record_progress,
@@ -823,16 +830,16 @@ class AlignmentCacheTest(unittest.TestCase):
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=_make_locus_statistics("beta"),
                 ) as analyze_locus,
             ):
-                resumed_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                resumed_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
@@ -850,8 +857,8 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_version_one_cache_is_migrated_and_upgraded(self) -> None:
         """Pass legacy results into the one-time polymorphism upgrade."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            allele_file_path = schema_directory_path / "locus.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            allele_file_path = scheme_directory_path / "locus.fasta"
             allele_file_path.write_text(
                 ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                 encoding="utf-8",
@@ -879,30 +886,30 @@ class AlignmentCacheTest(unittest.TestCase):
                 ],
                 "locus_statistics": [legacy_locus_statistics],
             }
-            (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).write_text(
+            (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).write_text(
                 json.dumps(version_one_cache),
                 encoding="utf-8",
             )
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=_make_locus_statistics("locus"),
                 ) as analyze_locus,
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     alignment_strategy=ALIGNMENT_STRATEGY_AUTO,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
             migrated_cache = json.loads(
-                (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).read_text(
+                (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).read_text(
                     encoding="utf-8"
                 )
             )
@@ -912,7 +919,7 @@ class AlignmentCacheTest(unittest.TestCase):
         self.assertIsNotNone(analyze_locus.call_args.args[4])
         self.assertEqual(
             migrated_cache["cache_version"],
-            SCHEMA_ALIGNMENT_CACHE_VERSION,
+            SCHEME_ALIGNMENT_CACHE_VERSION,
         )
         self.assertIn(
             "locus.fasta",
@@ -924,8 +931,8 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_version_two_cache_is_migrated_and_upgraded(self) -> None:
         """Preserve legacy Auto metrics during the polymorphism upgrade."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            allele_file_path = schema_directory_path / "locus.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            allele_file_path = scheme_directory_path / "locus.fasta"
             allele_file_path.write_text(
                 ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                 encoding="utf-8",
@@ -952,30 +959,30 @@ class AlignmentCacheTest(unittest.TestCase):
                     }
                 },
             }
-            (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).write_text(
+            (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).write_text(
                 json.dumps(version_two_cache),
                 encoding="utf-8",
             )
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=_make_locus_statistics("locus"),
                 ) as analyze_locus,
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     alignment_strategy=ALIGNMENT_STRATEGY_AUTO,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
             migrated_cache = json.loads(
-                (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).read_text(
+                (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).read_text(
                     encoding="utf-8"
                 )
             )
@@ -985,7 +992,7 @@ class AlignmentCacheTest(unittest.TestCase):
         self.assertIsNotNone(analyze_locus.call_args.args[4])
         self.assertEqual(
             migrated_cache["cache_version"],
-            SCHEMA_ALIGNMENT_CACHE_VERSION,
+            SCHEME_ALIGNMENT_CACHE_VERSION,
         )
         self.assertIn(
             ALIGNMENT_METHOD_IDENTIFIERS[ALIGNMENT_STRATEGY_AUTO],
@@ -995,8 +1002,8 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_version_three_cache_reuses_protein_while_upgrading_nucleotide(self) -> None:
         """Run only nucleotide MAFFT when adding polymorphism to a v3 locus."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            allele_file_path = schema_directory_path / "locus.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            allele_file_path = scheme_directory_path / "locus.fasta"
             allele_file_path.write_text(
                 ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                 encoding="utf-8",
@@ -1026,7 +1033,7 @@ class AlignmentCacheTest(unittest.TestCase):
                     }
                 },
             }
-            (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).write_text(
+            (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).write_text(
                 json.dumps(version_three_cache),
                 encoding="utf-8",
             )
@@ -1043,22 +1050,22 @@ class AlignmentCacheTest(unittest.TestCase):
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._run_mafft_alignment",
+                    "scheme.alignment._run_mafft_alignment",
                     return_value=nucleotide_metrics,
                 ) as run_mafft_alignment,
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
             upgraded_cache = json.loads(
-                (schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME).read_text(
+                (scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME).read_text(
                     encoding="utf-8"
                 )
             )
@@ -1080,22 +1087,22 @@ class AlignmentCacheTest(unittest.TestCase):
             ]
         )
 
-    def test_empty_schema_returns_empty_analysis_and_summary(self) -> None:
-        """Handle a schema with no recognized locus FASTA files."""
+    def test_empty_scheme_returns_empty_analysis_and_summary(self) -> None:
+        """Handle a scheme with no recognized locus FASTA files."""
         with (
             tempfile.TemporaryDirectory() as temporary_directory,
             patch(
-                "schema.alignment._get_mafft_version",
+                "scheme.alignment._get_mafft_version",
                 return_value="MAFFT test version",
             ),
-            patch("schema.alignment._analyze_locus") as analyze_locus,
+            patch("scheme.alignment._analyze_locus") as analyze_locus,
         ):
-            alignment_analysis = get_schema_alignment_analysis(
+            alignment_analysis = get_scheme_alignment_analysis(
                 temporary_directory,
                 maximum_parallel_loci=1,
                 progress_output_stream=None,
             )
-            alignment_summary = calculate_schema_alignment_summary(alignment_analysis)
+            alignment_summary = calculate_scheme_alignment_summary(alignment_analysis)
 
         analyze_locus.assert_not_called()
         self.assertEqual(alignment_analysis.locus_statistics, ())
@@ -1105,19 +1112,19 @@ class AlignmentCacheTest(unittest.TestCase):
             0.0,
         )
 
-    def test_default_worker_count_uses_every_process_available_cpu(self) -> None:
-        """Respect CPU affinity and cgroup limits when resolving concurrency."""
-        with patch("schema.alignment.os.process_cpu_count", return_value=12):
+    def test_default_worker_count_uses_shared_resource_budget(self) -> None:
+        """Use the conservative process-visible CPU policy by default."""
+        with patch("scheme.resources.os.process_cpu_count", return_value=12):
             worker_count = alignment._resolve_maximum_parallel_loci(None)
 
-        self.assertEqual(worker_count, 12)
+        self.assertEqual(worker_count, 8)
 
     def test_progress_reports_completed_loci_and_worker_count(self) -> None:
         """Expose cache-miss progress in the caller-provided terminal stream."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
+            scheme_directory_path = Path(temporary_directory)
             for locus_name in ("alpha", "beta"):
-                (schema_directory_path / f"{locus_name}.fasta").write_text(
+                (scheme_directory_path / f"{locus_name}.fasta").write_text(
                     ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                     encoding="utf-8",
                 )
@@ -1125,18 +1132,18 @@ class AlignmentCacheTest(unittest.TestCase):
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
-                    side_effect=lambda schema_path, allele_path, executable, strategy, cached: (
+                    "scheme.alignment._analyze_locus",
+                    side_effect=lambda scheme_path, allele_path, executable, strategy, cached: (
                         _make_locus_statistics(allele_path.stem)
                     ),
                 ),
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=2,
                     progress_output_stream=progress_output_stream,
                 )
@@ -1159,29 +1166,29 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_progress_callback_reports_cache_reuse_and_new_work(self) -> None:
         """Provide notebook progress for partial and complete cache reuse."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            alpha_path = schema_directory_path / "alpha.fasta"
+            scheme_directory_path = Path(temporary_directory)
+            alpha_path = scheme_directory_path / "alpha.fasta"
             alpha_path.write_text(
                 ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                 encoding="utf-8",
             )
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=_make_locus_statistics("alpha"),
                 ),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                 )
 
-            beta_path = schema_directory_path / "beta.fasta"
+            beta_path = scheme_directory_path / "beta.fasta"
             beta_path.write_text(
                 ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                 encoding="utf-8",
@@ -1189,16 +1196,16 @@ class AlignmentCacheTest(unittest.TestCase):
             partial_progress: list[AlignmentProgress] = []
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
+                    "scheme.alignment._analyze_locus",
                     return_value=_make_locus_statistics("beta"),
                 ),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                     progress_callback=partial_progress.append,
@@ -1206,11 +1213,11 @@ class AlignmentCacheTest(unittest.TestCase):
 
             cached_progress: list[AlignmentProgress] = []
             with patch(
-                "schema.alignment._get_mafft_version",
+                "scheme.alignment._get_mafft_version",
                 side_effect=AssertionError("MAFFT version was requested"),
             ):
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
                     progress_callback=cached_progress.append,
@@ -1228,27 +1235,27 @@ class AlignmentCacheTest(unittest.TestCase):
     def test_scheduler_handles_five_hundred_loci(self) -> None:
         """Schedule a cgMLST-sized batch while preserving deterministic order."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
+            scheme_directory_path = Path(temporary_directory)
             for locus_index in range(500):
-                (schema_directory_path / f"locus_{locus_index:03d}.fasta").write_text(
+                (scheme_directory_path / f"locus_{locus_index:03d}.fasta").write_text(
                     ">allele_1\nATGTAA\n>allele_2\nATGAAATAA\n",
                     encoding="utf-8",
                 )
 
             with (
                 patch(
-                    "schema.alignment._get_mafft_version",
+                    "scheme.alignment._get_mafft_version",
                     return_value="MAFFT test version",
                 ),
                 patch(
-                    "schema.alignment._analyze_locus",
-                    side_effect=lambda schema_path, allele_path, executable, strategy, cached: (
+                    "scheme.alignment._analyze_locus",
+                    side_effect=lambda scheme_path, allele_path, executable, strategy, cached: (
                         _make_locus_statistics(allele_path.stem)
                     ),
                 ),
             ):
-                alignment_analysis = get_schema_alignment_analysis(
-                    schema_directory_path,
+                alignment_analysis = get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     maximum_parallel_loci=8,
                     progress_output_stream=None,
                 )
@@ -1268,11 +1275,11 @@ class AlignmentCacheTest(unittest.TestCase):
 class MafftIntegrationTest(unittest.TestCase):
     """Run one tiny real alignment when the development dependency exists."""
 
-    def test_tiny_schema_alignment(self) -> None:
+    def test_tiny_scheme_alignment(self) -> None:
         """Verify all strategies with real nucleotide and protein alignments."""
         with tempfile.TemporaryDirectory() as temporary_directory:
-            schema_directory_path = Path(temporary_directory)
-            (schema_directory_path / "locus.fasta").write_text(
+            scheme_directory_path = Path(temporary_directory)
+            (scheme_directory_path / "locus.fasta").write_text(
                 (
                     ">locus_1\nATGAAATAA\n"
                     ">locus_2\nATGAAAAAATAA\n"
@@ -1282,8 +1289,8 @@ class MafftIntegrationTest(unittest.TestCase):
             )
 
             alignment_analyses = tuple(
-                get_schema_alignment_analysis(
-                    schema_directory_path,
+                get_scheme_alignment_analysis(
+                    scheme_directory_path,
                     alignment_strategy=alignment_strategy,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,

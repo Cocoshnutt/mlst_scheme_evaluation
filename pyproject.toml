@@ -1,8 +1,9 @@
 [project]
 name = "mlst-scheme-evaluation"
 version = "0.1.0"
-description = "Evaluate MLST schemas in a marimo notebook"
+description = "Evaluate MLST schemes in marimo notebooks"
 readme = "README.md"
+license = "EUPL-1.2"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "altair>=5.4.0",

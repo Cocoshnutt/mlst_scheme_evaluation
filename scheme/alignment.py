@@ -41,7 +41,6 @@ only to cached proportions, so changing it never reruns MAFFT.
 import argparse
 import gzip
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -57,11 +56,17 @@ from .allele_info import (
     _translate_valid_allele,
 )
 from .info import FASTA_FILENAME_SUFFIXES
+from .resources import resolve_worker_count
 
-SCHEMA_ALIGNMENT_CACHE_FILENAME = ".schema-alignment-cache.json"
-SCHEMA_ALIGNMENT_CACHE_VERSION = 4
-SCHEMA_ALIGNMENT_CACHE_CHECKPOINT_LOCUS_INTERVAL = 10
-SCHEMA_ALIGNMENT_CACHE_CHECKPOINT_SECONDS = 5.0
+SCHEME_ALIGNMENT_CACHE_FILENAME = ".scheme-alignment-cache.json"
+LEGACY_ALIGNMENT_CACHE_FILENAME = ".schema-alignment-cache.json"
+SCHEME_ALIGNMENT_CACHE_FILENAMES = (
+    SCHEME_ALIGNMENT_CACHE_FILENAME,
+    LEGACY_ALIGNMENT_CACHE_FILENAME,
+)
+SCHEME_ALIGNMENT_CACHE_VERSION = 4
+SCHEME_ALIGNMENT_CACHE_CHECKPOINT_LOCUS_INTERVAL = 10
+SCHEME_ALIGNMENT_CACHE_CHECKPOINT_SECONDS = 5.0
 DEFAULT_AMINO_ACID_GAP_WARNING_THRESHOLD_PERCENTAGE = 5.0
 IUPAC_DNA_BASES = frozenset("ACGTRYSWKMBDHVN")
 ALIGNMENT_STRATEGY_FFT_NS_2 = "fft-ns-2"
@@ -98,14 +103,15 @@ __all__ = [
     "DEFAULT_ALIGNMENT_STRATEGY",
     "DEFAULT_AMINO_ACID_GAP_WARNING_THRESHOLD_PERCENTAGE",
     "IUPAC_DNA_BASES",
-    "SCHEMA_ALIGNMENT_CACHE_FILENAME",
-    "SCHEMA_ALIGNMENT_CACHE_VERSION",
+    "SCHEME_ALIGNMENT_CACHE_FILENAME",
+    "SCHEME_ALIGNMENT_CACHE_FILENAMES",
+    "SCHEME_ALIGNMENT_CACHE_VERSION",
     "AlignmentProgress",
     "LocusAlignmentStatistics",
-    "SchemaAlignmentAnalysis",
-    "SchemaAlignmentSummary",
-    "calculate_schema_alignment_summary",
-    "get_schema_alignment_analysis",
+    "SchemeAlignmentAnalysis",
+    "SchemeAlignmentSummary",
+    "calculate_scheme_alignment_summary",
+    "get_scheme_alignment_analysis",
 ]
 
 
@@ -114,7 +120,7 @@ class LocusAlignmentStatistics:
     """Nucleotide and amino-acid alignment statistics for one locus.
 
     Attributes:
-        locus_name: Schema-relative locus name without a FASTA suffix.
+        locus_name: Scheme-relative locus name without a FASTA suffix.
         total_allele_count: Total FASTA records in the locus.
         nucleotide_aligned_sequence_count: Non-empty IUPAC DNA records passed
             to MAFFT.
@@ -172,7 +178,7 @@ class LocusAlignmentStatistics:
 
 
 @dataclass(frozen=True)
-class SchemaAlignmentAnalysis:
+class SchemeAlignmentAnalysis:
     """Cached alignment provenance and ordered per-locus statistics."""
 
     mafft_version: str
@@ -182,7 +188,7 @@ class SchemaAlignmentAnalysis:
 
 
 @dataclass(frozen=True)
-class SchemaAlignmentSummary:
+class SchemeAlignmentSummary:
     """Scheme-level availability and amino-acid warning-threshold summary."""
 
     locus_count: int
@@ -203,7 +209,7 @@ class AlignmentProgress:
     """Progress reported while cached and uncached loci are assembled.
 
     Attributes:
-        total_locus_count: Total loci in the current schema.
+        total_locus_count: Total loci in the current scheme.
         completed_locus_count: Cached or newly analyzed loci now available.
         cached_locus_count: Loci reused from a compatible per-locus cache.
         current_locus_name: Most recently analyzed locus, or ``None`` for the
@@ -377,18 +383,18 @@ def _format_duration(duration_seconds: float) -> str:
     return f"{seconds:d}s"
 
 
-def _resolve_schema_directory_path(schema_directory_path: str | Path) -> Path:
+def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
     """Resolve and validate an extracted scheme directory."""
-    resolved_schema_directory_path = Path(schema_directory_path).resolve()
-    if not resolved_schema_directory_path.exists():
+    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
+    if not resolved_scheme_directory_path.exists():
         raise FileNotFoundError(
-            f"Schema directory does not exist: {resolved_schema_directory_path}"
+            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
         )
-    if not resolved_schema_directory_path.is_dir():
+    if not resolved_scheme_directory_path.is_dir():
         raise NotADirectoryError(
-            f"Schema path is not a directory: {resolved_schema_directory_path}"
+            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
         )
-    return resolved_schema_directory_path
+    return resolved_scheme_directory_path
 
 
 def _is_fasta_file(candidate_file_path: Path) -> bool:
@@ -399,20 +405,20 @@ def _is_fasta_file(candidate_file_path: Path) -> bool:
 
 
 def _find_allele_file_paths(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
 ) -> tuple[Path, ...]:
     """Return recognized locus FASTA files in deterministic order."""
     return tuple(
         sorted(
             candidate_file_path
-            for candidate_file_path in schema_directory_path.rglob("*")
+            for candidate_file_path in scheme_directory_path.rglob("*")
             if _is_fasta_file(candidate_file_path)
         )
     )
 
 
 def _remove_fasta_filename_suffix(relative_file_path: str) -> str:
-    """Remove a recognized FASTA suffix from a schema-relative path."""
+    """Remove a recognized FASTA suffix from a scheme-relative path."""
     lowercase_relative_file_path = relative_file_path.lower()
     for filename_suffix in sorted(FASTA_FILENAME_SUFFIXES, key=len, reverse=True):
         if lowercase_relative_file_path.endswith(filename_suffix):
@@ -451,7 +457,7 @@ def _read_fasta_sequences(allele_file_path: Path) -> tuple[str, ...]:
 
 
 def _create_source_signature(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     allele_file_paths: Iterable[Path],
 ) -> tuple[tuple[str, int, int], ...]:
     """Create the FASTA metadata signature used for cache invalidation."""
@@ -460,7 +466,7 @@ def _create_source_signature(
         allele_file_status = allele_file_path.stat()
         source_signature.append(
             (
-                allele_file_path.relative_to(schema_directory_path).as_posix(),
+                allele_file_path.relative_to(scheme_directory_path).as_posix(),
                 allele_file_status.st_size,
                 allele_file_status.st_mtime_ns,
             )
@@ -726,7 +732,7 @@ def _restore_cached_alignment_metrics(
 
 
 def _analyze_locus(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     allele_file_path: Path,
     mafft_executable: str,
     alignment_strategy: str = DEFAULT_ALIGNMENT_STRATEGY,
@@ -795,7 +801,7 @@ def _analyze_locus(
             alignment_strategy=alignment_strategy,
         )
     locus_name = _remove_fasta_filename_suffix(
-        allele_file_path.relative_to(schema_directory_path).as_posix()
+        allele_file_path.relative_to(scheme_directory_path).as_posix()
     )
     return LocusAlignmentStatistics(
         locus_name=locus_name,
@@ -911,14 +917,21 @@ def _deserialize_locus_statistics(
 
 
 def _read_cached_alignment_cache(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
 ) -> _AlignmentCache | None:
     """Read the strategy cache or migrate compatible version-one/two data."""
-    cache_file_path = schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME
+    cache_file_path = next(
+        (
+            scheme_directory_path / cache_filename
+            for cache_filename in SCHEME_ALIGNMENT_CACHE_FILENAMES
+            if (scheme_directory_path / cache_filename).is_file()
+        ),
+        scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME,
+    )
     try:
         cached_data = json.loads(cache_file_path.read_text(encoding="utf-8"))
         cache_version = int(cached_data["cache_version"])
-        if cache_version in (3, SCHEMA_ALIGNMENT_CACHE_VERSION):
+        if cache_version in (3, SCHEME_ALIGNMENT_CACHE_VERSION):
             method_caches = {
                 str(alignment_method_identifier): _CachedAlignmentMethod(
                     mafft_version=str(dict(method_data)["mafft_version"]),
@@ -997,7 +1010,7 @@ def _deserialize_cached_locus_entries(
             nucleotide_polymorphism_metrics_calculated=bool(
                 parsed_locus_entry_data.get(
                     "nucleotide_polymorphism_metrics_calculated",
-                    cache_version >= SCHEMA_ALIGNMENT_CACHE_VERSION,
+                    cache_version >= SCHEME_ALIGNMENT_CACHE_VERSION,
                 )
             ),
         )
@@ -1005,12 +1018,12 @@ def _deserialize_cached_locus_entries(
 
 
 def _write_cached_alignment_cache(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     method_caches: dict[str, _CachedAlignmentMethod],
 ) -> None:
     """Atomically persist all strategy-specific per-locus metrics."""
     cached_data = {
-        "cache_version": SCHEMA_ALIGNMENT_CACHE_VERSION,
+        "cache_version": SCHEME_ALIGNMENT_CACHE_VERSION,
         "methods": {
             alignment_method_identifier: {
                 "mafft_version": method_caches[
@@ -1040,15 +1053,15 @@ def _write_cached_alignment_cache(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=schema_directory_path,
-            prefix=f"{SCHEMA_ALIGNMENT_CACHE_FILENAME}.",
+            dir=scheme_directory_path,
+            prefix=f"{SCHEME_ALIGNMENT_CACHE_FILENAME}.",
             delete=False,
         ) as temporary_cache_file:
             json.dump(cached_data, temporary_cache_file, separators=(",", ":"))
             temporary_cache_file_path = Path(temporary_cache_file.name)
 
         temporary_cache_file_path.replace(
-            schema_directory_path / SCHEMA_ALIGNMENT_CACHE_FILENAME
+            scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME
         )
     finally:
         if temporary_cache_file_path is not None:
@@ -1056,13 +1069,13 @@ def _write_cached_alignment_cache(
 
 
 def _try_write_cached_alignment_cache(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     method_caches: dict[str, _CachedAlignmentMethod],
 ) -> None:
     """Persist a checkpoint without making a read-only directory fatal."""
     try:
         _write_cached_alignment_cache(
-            schema_directory_path,
+            scheme_directory_path,
             method_caches,
         )
     except OSError:
@@ -1126,18 +1139,18 @@ def _resolve_maximum_parallel_loci(
         if maximum_parallel_loci < 1:
             raise ValueError("maximum_parallel_loci must be at least one")
         return maximum_parallel_loci
-    return os.process_cpu_count() or 1
+    return resolve_worker_count(None)
 
 
-def get_schema_alignment_analysis(
-    schema_directory_path: str | Path,
+def get_scheme_alignment_analysis(
+    scheme_directory_path: str | Path,
     *,
     mafft_executable: str = "mafft",
     alignment_strategy: str = DEFAULT_ALIGNMENT_STRATEGY,
     maximum_parallel_loci: int | None = None,
     progress_output_stream: TextIO | None = sys.stdout,
     progress_callback: Callable[[AlignmentProgress], None] | None = None,
-) -> SchemaAlignmentAnalysis:
+) -> SchemeAlignmentAnalysis:
     """Return cached or newly calculated within-locus alignment statistics.
 
     Unchanged, non-failed loci are reused from the selected strategy's
@@ -1147,12 +1160,13 @@ def get_schema_alignment_analysis(
     concurrently.
 
     Args:
-        schema_directory_path: Directory containing an extracted MLST scheme.
+        scheme_directory_path: Directory containing an extracted MLST scheme.
         mafft_executable: MAFFT executable name or path.
         alignment_strategy: ``fft-ns-2`` (the fast default), ``fft-ns-1``
             (the fastest and roughest option), or ``auto`` (MAFFT-selected).
         maximum_parallel_loci: Maximum concurrent locus analyses. The default
-            uses every CPU available to the current process.
+            uses 80% of CPUs available to the current process, rounded down to
+            an even count when possible and with a one-worker minimum.
         progress_output_stream: Stream receiving completion-based MAFFT
             progress on a cache miss. Pass ``None`` to disable progress.
         progress_callback: Optional function called first with cache-reuse
@@ -1163,8 +1177,8 @@ def get_schema_alignment_analysis(
         Alignment provenance and statistics ordered by locus path.
 
     Raises:
-        FileNotFoundError: If the schema directory does not exist.
-        NotADirectoryError: If the schema path is not a directory.
+        FileNotFoundError: If the scheme directory does not exist.
+        NotADirectoryError: If the scheme path is not a directory.
         RuntimeError: If MAFFT is unavailable or its version cannot be read.
         ValueError: If the strategy is unsupported or
             ``maximum_parallel_loci`` is less than one.
@@ -1173,12 +1187,12 @@ def get_schema_alignment_analysis(
     alignment_method_identifier = ALIGNMENT_METHOD_IDENTIFIERS[
         resolved_alignment_strategy
     ]
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
-    allele_file_paths = _find_allele_file_paths(resolved_schema_directory_path)
+    allele_file_paths = _find_allele_file_paths(resolved_scheme_directory_path)
     source_signature = _create_source_signature(
-        resolved_schema_directory_path,
+        resolved_scheme_directory_path,
         allele_file_paths,
     )
     source_signature_by_relative_path = {
@@ -1187,12 +1201,12 @@ def get_schema_alignment_analysis(
     }
     allele_file_path_by_relative_path = {
         allele_file_path.relative_to(
-            resolved_schema_directory_path
+            resolved_scheme_directory_path
         ).as_posix(): allele_file_path
         for allele_file_path in allele_file_paths
     }
     cached_alignment_cache = _read_cached_alignment_cache(
-        resolved_schema_directory_path
+        resolved_scheme_directory_path
     )
     method_caches = (
         dict(cached_alignment_cache.method_caches)
@@ -1250,7 +1264,7 @@ def get_schema_alignment_analysis(
             )
         if (
             cached_alignment_cache is None
-            or cached_alignment_cache.cache_version != SCHEMA_ALIGNMENT_CACHE_VERSION
+            or cached_alignment_cache.cache_version != SCHEME_ALIGNMENT_CACHE_VERSION
             or set(selected_method_cache.locus_entries)
             != set(source_signature_by_relative_path)
         ):
@@ -1259,10 +1273,10 @@ def get_schema_alignment_analysis(
                 locus_entries=reusable_locus_entries,
             )
             _try_write_cached_alignment_cache(
-                resolved_schema_directory_path,
+                resolved_scheme_directory_path,
                 method_caches,
             )
-        return SchemaAlignmentAnalysis(
+        return SchemeAlignmentAnalysis(
             mafft_version=selected_method_cache.mafft_version,
             alignment_strategy=resolved_alignment_strategy,
             alignment_method_identifier=alignment_method_identifier,
@@ -1321,7 +1335,7 @@ def get_schema_alignment_analysis(
         future_to_relative_path = {
             executor.submit(
                 _analyze_locus,
-                resolved_schema_directory_path,
+                resolved_scheme_directory_path,
                 allele_file_path_by_relative_path[relative_path],
                 mafft_executable,
                 resolved_alignment_strategy,
@@ -1368,16 +1382,16 @@ def get_schema_alignment_analysis(
             current_time = time.monotonic()
             if (
                 completed_since_checkpoint
-                >= SCHEMA_ALIGNMENT_CACHE_CHECKPOINT_LOCUS_INTERVAL
+                >= SCHEME_ALIGNMENT_CACHE_CHECKPOINT_LOCUS_INTERVAL
                 or current_time - last_checkpoint_time
-                >= SCHEMA_ALIGNMENT_CACHE_CHECKPOINT_SECONDS
+                >= SCHEME_ALIGNMENT_CACHE_CHECKPOINT_SECONDS
             ):
                 method_caches[alignment_method_identifier] = _CachedAlignmentMethod(
                     mafft_version=mafft_version,
                     locus_entries=dict(current_locus_entries),
                 )
                 _try_write_cached_alignment_cache(
-                    resolved_schema_directory_path,
+                    resolved_scheme_directory_path,
                     method_caches,
                 )
                 completed_since_checkpoint = 0
@@ -1390,11 +1404,11 @@ def get_schema_alignment_analysis(
             locus_entries=dict(current_locus_entries),
         )
         _try_write_cached_alignment_cache(
-            resolved_schema_directory_path,
+            resolved_scheme_directory_path,
             method_caches,
         )
 
-    alignment_analysis = SchemaAlignmentAnalysis(
+    alignment_analysis = SchemeAlignmentAnalysis(
         mafft_version=mafft_version,
         alignment_strategy=resolved_alignment_strategy,
         alignment_method_identifier=alignment_method_identifier,
@@ -1406,12 +1420,12 @@ def get_schema_alignment_analysis(
     return alignment_analysis
 
 
-def calculate_schema_alignment_summary(
-    alignment_analysis: SchemaAlignmentAnalysis,
+def calculate_scheme_alignment_summary(
+    alignment_analysis: SchemeAlignmentAnalysis,
     amino_acid_gap_warning_threshold_percentage: float = (
         DEFAULT_AMINO_ACID_GAP_WARNING_THRESHOLD_PERCENTAGE
     ),
-) -> SchemaAlignmentSummary:
+) -> SchemeAlignmentSummary:
     """Summarize availability and apply an advisory amino-acid gap threshold.
 
     The comparison is strictly greater than the supplied threshold. The
@@ -1460,7 +1474,7 @@ def calculate_schema_alignment_summary(
         if amino_acid_aligned_locus_count
         else 0.0
     )
-    return SchemaAlignmentSummary(
+    return SchemeAlignmentSummary(
         locus_count=len(locus_statistics),
         nucleotide_aligned_locus_count=nucleotide_aligned_locus_count,
         nucleotide_unavailable_locus_count=nucleotide_unavailable_locus_count,
@@ -1504,7 +1518,7 @@ def main() -> None:
         )
     )
     argument_parser.add_argument(
-        "schema_directory",
+        "scheme_directory",
         type=Path,
         help="directory containing an extracted MLST scheme",
     )
@@ -1530,7 +1544,11 @@ def main() -> None:
         default=None,
         dest="maximum_parallel_loci",
         metavar="COUNT",
-        help="maximum concurrent single-threaded locus alignments",
+        help=(
+            "maximum concurrent single-threaded locus alignments (default: "
+            "80%% of available CPUs, rounded down to an even count when "
+            "possible)"
+        ),
     )
     argument_parser.add_argument(
         "--amino-acid-gap-threshold",
@@ -1541,14 +1559,14 @@ def main() -> None:
         help=("advisory amino-acid gap threshold (default: 5; comparison is >)"),
     )
     command_line_arguments = argument_parser.parse_args()
-    alignment_analysis = get_schema_alignment_analysis(
-        command_line_arguments.schema_directory,
+    alignment_analysis = get_scheme_alignment_analysis(
+        command_line_arguments.scheme_directory,
         mafft_executable=command_line_arguments.mafft_executable,
         alignment_strategy=command_line_arguments.alignment_strategy,
         maximum_parallel_loci=command_line_arguments.maximum_parallel_loci,
         progress_output_stream=sys.stderr,
     )
-    alignment_summary = calculate_schema_alignment_summary(
+    alignment_summary = calculate_scheme_alignment_summary(
         alignment_analysis,
         amino_acid_gap_warning_threshold_percentage=(
             command_line_arguments.amino_acid_gap_warning_threshold_percentage

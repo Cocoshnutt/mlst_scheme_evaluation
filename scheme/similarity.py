@@ -2,7 +2,7 @@
 
 This module compares one deterministically selected nucleotide and translated
 amino-acid allele between different loci in an extracted MLST or cgMLST
-schema. It is an intrinsic schema analysis: no genome assemblies are used, and
+scheme. It is an intrinsic scheme analysis: no genome assemblies are used, and
 similarity must not be interpreted as proof of copy number or evolutionary
 paralogy.
 
@@ -40,7 +40,7 @@ same-gene evidence and does not create a candidate classification by itself.
 These study-specific values are configurable screening references, not proof
 of copy number or evolutionary paralogy.
 
-Results are cached atomically inside the extracted schema using the FASTA
+Results are cached atomically inside the extracted scheme using the FASTA
 source signature, BLAST versions, allele-selection method, and search
 settings. Temporary FASTA files, BLAST databases, and raw output are removed
 after calculation. The public API is independent of Marimo and includes a
@@ -50,7 +50,6 @@ typed progress callback for notebook and terminal monitoring.
 import argparse
 import gzip
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -65,9 +64,15 @@ from typing import TextIO
 from .alignment import IUPAC_DNA_BASES
 from .allele_info import _evaluate_allele_sequence, _translate_valid_allele
 from .info import FASTA_FILENAME_SUFFIXES
+from .resources import resolve_worker_count
 
-SCHEMA_SIMILARITY_CACHE_FILENAME = ".schema-similarity-cache.json"
-SCHEMA_SIMILARITY_CACHE_VERSION = 2
+SCHEME_SIMILARITY_CACHE_FILENAME = ".scheme-similarity-cache.json"
+LEGACY_SIMILARITY_CACHE_FILENAME = ".schema-similarity-cache.json"
+SCHEME_SIMILARITY_CACHE_FILENAMES = (
+    SCHEME_SIMILARITY_CACHE_FILENAME,
+    LEGACY_SIMILARITY_CACHE_FILENAME,
+)
+SCHEME_SIMILARITY_CACHE_VERSION = 2
 SIMILARITY_METHOD_IDENTIFIER = "blast-modal-length-selected-alleles-bsr-v2"
 DEFAULT_BLAST_EVALUE = 0.001
 DEFAULT_CANDIDATE_PARALOG_AMINO_ACID_IDENTITY_THRESHOLD_PERCENTAGE = 70.0
@@ -84,8 +89,9 @@ __all__ = [
     "DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_ALIGNMENT_LENGTH_THRESHOLD",
     "DEFAULT_REPEATED_HOMOLOGY_NUCLEOTIDE_IDENTITY_THRESHOLD_PERCENTAGE",
     "DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD",
-    "SCHEMA_SIMILARITY_CACHE_FILENAME",
-    "SCHEMA_SIMILARITY_CACHE_VERSION",
+    "SCHEME_SIMILARITY_CACHE_FILENAME",
+    "SCHEME_SIMILARITY_CACHE_FILENAMES",
+    "SCHEME_SIMILARITY_CACHE_VERSION",
     "SEQUENCE_LEVEL_AMINO_ACID",
     "SEQUENCE_LEVEL_NUCLEOTIDE",
     "SIMILARITY_METHOD_IDENTIFIER",
@@ -93,10 +99,10 @@ __all__ = [
     "CandidateParalogThresholds",
     "CandidateParalogousLocusPair",
     "CrossLocusSimilarityMatch",
-    "SchemaSimilarityAnalysis",
+    "SchemeSimilarityAnalysis",
     "SimilarityProgress",
     "classify_candidate_paralogous_locus_pairs",
-    "get_schema_similarity_analysis",
+    "get_scheme_similarity_analysis",
 ]
 
 
@@ -141,7 +147,7 @@ class CrossLocusSimilarityMatch:
 
 
 @dataclass(frozen=True)
-class SchemaSimilarityAnalysis:
+class SchemeSimilarityAnalysis:
     """Complete selected-allele cross-locus similarity analysis."""
 
     locus_count: int
@@ -337,7 +343,7 @@ def _blast_score_ratio_sort_key(
 
 
 def classify_candidate_paralogous_locus_pairs(
-    schema_similarity_analysis: SchemaSimilarityAnalysis,
+    scheme_similarity_analysis: SchemeSimilarityAnalysis,
     *,
     thresholds: CandidateParalogThresholds | None = None,
 ) -> CandidateParalogAnalysis:
@@ -356,7 +362,7 @@ def classify_candidate_paralogous_locus_pairs(
     not modified or recalculated, making repeated threshold changes cheap.
 
     Args:
-        schema_similarity_analysis: Cached or newly calculated directed BLAST
+        scheme_similarity_analysis: Cached or newly calculated directed BLAST
             measurements for the selected scheme.
         thresholds: Study-derived screening values to apply. The documented
             defaults are used when omitted.
@@ -370,7 +376,7 @@ def classify_candidate_paralogous_locus_pairs(
     matches_by_locus_pair: dict[
         tuple[str, str], list[CrossLocusSimilarityMatch]
     ] = {}
-    for similarity_match in schema_similarity_analysis.matches:
+    for similarity_match in scheme_similarity_analysis.matches:
         if similarity_match.sequence_level not in {
             SEQUENCE_LEVEL_NUCLEOTIDE,
             SEQUENCE_LEVEL_AMINO_ACID,
@@ -476,7 +482,7 @@ def classify_candidate_paralogous_locus_pairs(
 
 @dataclass(frozen=True)
 class SimilarityProgress:
-    """Progress update emitted by :func:`get_schema_similarity_analysis`."""
+    """Progress update emitted by :func:`get_scheme_similarity_analysis`."""
 
     completed_stage_count: int
     total_stage_count: int
@@ -533,18 +539,18 @@ type _SourceSignature = tuple[tuple[str, int, int], ...]
 type SimilarityProgressCallback = Callable[[SimilarityProgress], None]
 
 
-def _resolve_schema_directory_path(schema_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted schema directory."""
-    resolved_schema_directory_path = Path(schema_directory_path).resolve()
-    if not resolved_schema_directory_path.exists():
+def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
+    """Resolve and validate an extracted scheme directory."""
+    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
+    if not resolved_scheme_directory_path.exists():
         raise FileNotFoundError(
-            f"Schema directory does not exist: {resolved_schema_directory_path}"
+            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
         )
-    if not resolved_schema_directory_path.is_dir():
+    if not resolved_scheme_directory_path.is_dir():
         raise NotADirectoryError(
-            f"Schema path is not a directory: {resolved_schema_directory_path}"
+            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
         )
-    return resolved_schema_directory_path
+    return resolved_scheme_directory_path
 
 
 def _is_fasta_file(candidate_file_path: Path) -> bool:
@@ -554,12 +560,12 @@ def _is_fasta_file(candidate_file_path: Path) -> bool:
     )
 
 
-def _find_all_fasta_file_paths(schema_directory_path: Path) -> tuple[Path, ...]:
+def _find_all_fasta_file_paths(scheme_directory_path: Path) -> tuple[Path, ...]:
     """Return every recognized locus FASTA in deterministic path order."""
     return tuple(
         sorted(
             candidate_file_path
-            for candidate_file_path in schema_directory_path.rglob("*")
+            for candidate_file_path in scheme_directory_path.rglob("*")
             if _is_fasta_file(candidate_file_path)
         )
     )
@@ -574,11 +580,11 @@ def _remove_fasta_filename_suffix(relative_file_path: str) -> str:
 
 
 def _locus_name_from_file_path(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     locus_file_path: Path,
 ) -> str:
-    """Return the schema-relative locus name without its FASTA suffix."""
-    relative_file_path = locus_file_path.relative_to(schema_directory_path).as_posix()
+    """Return the scheme-relative locus name without its FASTA suffix."""
+    relative_file_path = locus_file_path.relative_to(scheme_directory_path).as_posix()
     return _remove_fasta_filename_suffix(relative_file_path)
 
 def _iterate_fasta_records(fasta_lines: Iterable[str]) -> Iterable[_FastaRecord]:
@@ -696,7 +702,7 @@ def _select_allele_closest_to_modal_length(
 
 
 def _collect_selected_allele_sequences(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     all_fasta_file_paths: tuple[Path, ...],
 ) -> tuple[
     tuple[_SelectedAlleleSequence, ...],
@@ -710,7 +716,7 @@ def _collect_selected_allele_sequences(
 
     for locus_file_path in all_fasta_file_paths:
         locus_name = _locus_name_from_file_path(
-            schema_directory_path,
+            scheme_directory_path,
             locus_file_path,
         )
         locus_records = _read_fasta_records(locus_file_path)
@@ -754,13 +760,13 @@ def _collect_selected_allele_sequences(
 
 
 def _create_source_signature(
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     fasta_file_paths: Iterable[Path],
 ) -> _SourceSignature:
     """Create a path, size, and modification-time FASTA signature."""
     return tuple(
         (
-            fasta_file_path.relative_to(schema_directory_path).as_posix(),
+            fasta_file_path.relative_to(scheme_directory_path).as_posix(),
             fasta_file_path.stat().st_size,
             fasta_file_path.stat().st_mtime_ns,
         )
@@ -1086,17 +1092,24 @@ def _deserialize_similarity_match(
 
 def _read_cached_analysis(
     *,
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     source_signature: _SourceSignature,
     blastn_version: str | None,
     blastp_version: str | None,
     blast_evalue: float,
-) -> SchemaSimilarityAnalysis | None:
+) -> SchemeSimilarityAnalysis | None:
     """Read a compatible similarity cache or return ``None``."""
-    cache_file_path = schema_directory_path / SCHEMA_SIMILARITY_CACHE_FILENAME
+    cache_file_path = next(
+        (
+            scheme_directory_path / cache_filename
+            for cache_filename in SCHEME_SIMILARITY_CACHE_FILENAMES
+            if (scheme_directory_path / cache_filename).is_file()
+        ),
+        scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAME,
+    )
     try:
         cache_data = json.loads(cache_file_path.read_text(encoding="utf-8"))
-        if int(cache_data["cache_version"]) != SCHEMA_SIMILARITY_CACHE_VERSION:
+        if int(cache_data["cache_version"]) != SCHEME_SIMILARITY_CACHE_VERSION:
             return None
         if str(cache_data["method_identifier"]) != SIMILARITY_METHOD_IDENTIFIER:
             return None
@@ -1120,7 +1133,7 @@ def _read_cached_analysis(
         )
         if cached_source_signature != source_signature:
             return None
-        return SchemaSimilarityAnalysis(
+        return SchemeSimilarityAnalysis(
             locus_count=int(cache_data["locus_count"]),
             nucleotide_selected_locus_count=int(
                 cache_data["nucleotide_selected_locus_count"]
@@ -1150,13 +1163,13 @@ def _read_cached_analysis(
 
 def _write_cached_analysis(
     *,
-    schema_directory_path: Path,
+    scheme_directory_path: Path,
     source_signature: _SourceSignature,
-    analysis: SchemaSimilarityAnalysis,
+    analysis: SchemeSimilarityAnalysis,
 ) -> None:
-    """Atomically persist one similarity analysis when the schema is writable."""
+    """Atomically persist one similarity analysis when the scheme is writable."""
     cache_data = {
-        "cache_version": SCHEMA_SIMILARITY_CACHE_VERSION,
+        "cache_version": SCHEME_SIMILARITY_CACHE_VERSION,
         "method_identifier": analysis.method_identifier,
         "blastn_version": analysis.blastn_version,
         "blastp_version": analysis.blastp_version,
@@ -1182,15 +1195,15 @@ def _write_cached_analysis(
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=schema_directory_path,
-            prefix=f"{SCHEMA_SIMILARITY_CACHE_FILENAME}.",
+            dir=scheme_directory_path,
+            prefix=f"{SCHEME_SIMILARITY_CACHE_FILENAME}.",
             suffix=".tmp",
             delete=False,
         ) as temporary_cache_file:
             json.dump(cache_data, temporary_cache_file, separators=(",", ":"))
             temporary_cache_file_path = Path(temporary_cache_file.name)
         temporary_cache_file_path.replace(
-            schema_directory_path / SCHEMA_SIMILARITY_CACHE_FILENAME
+            scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAME
         )
     except OSError:
         if temporary_cache_file_path is not None:
@@ -1203,7 +1216,7 @@ def _resolve_maximum_threads(maximum_threads: int | None) -> int:
         if maximum_threads < 1:
             raise ValueError("maximum_threads must be at least 1")
         return maximum_threads
-    return max(1, os.process_cpu_count() or 1)
+    return resolve_worker_count(None)
 
 
 def _emit_progress(
@@ -1224,8 +1237,8 @@ def _emit_progress(
         )
 
 
-def get_schema_similarity_analysis(
-    schema_directory_path: str | Path,
+def get_scheme_similarity_analysis(
+    scheme_directory_path: str | Path,
     *,
     maximum_threads: int | None = None,
     blast_evalue: float = DEFAULT_BLAST_EVALUE,
@@ -1234,15 +1247,16 @@ def get_schema_similarity_analysis(
     makeblastdb_executable: str = "makeblastdb",
     progress_callback: SimilarityProgressCallback | None = None,
     progress_output_stream: TextIO | None = None,
-) -> SchemaSimilarityAnalysis:
+) -> SchemeSimilarityAnalysis:
     """Measure selected-allele nucleotide and protein cross-locus hits.
 
     Args:
-        schema_directory_path: Extracted scheme directory containing one locus
+        scheme_directory_path: Extracted scheme directory containing one locus
             FASTA per target.
-        maximum_threads: Total BLAST thread budget. Defaults to all logical
-            CPUs available to the process and is split between simultaneous
-            nucleotide and protein searches.
+        maximum_threads: Total BLAST thread budget. The default uses 80% of
+            CPUs available to the process, rounded down to an even count when
+            possible, and is split between simultaneous nucleotide and protein
+            searches.
         blast_evalue: BLAST reporting floor. This controls search sensitivity;
             it is not a candidate-paralogy classification threshold.
         blastn_executable: ``blastn`` executable name or path.
@@ -1252,19 +1266,19 @@ def get_schema_similarity_analysis(
         progress_output_stream: Optional terminal stream for progress lines.
 
     Returns:
-        A cache-aware :class:`SchemaSimilarityAnalysis` containing only
+        A cache-aware :class:`SchemeSimilarityAnalysis` containing only
         directed cross-locus local hits reported by BLAST.
     """
     if blast_evalue <= 0:
         raise ValueError("blast_evalue must be greater than zero")
-    resolved_schema_directory_path = _resolve_schema_directory_path(
-        schema_directory_path
+    resolved_scheme_directory_path = _resolve_scheme_directory_path(
+        scheme_directory_path
     )
     all_fasta_file_paths = _find_all_fasta_file_paths(
-        resolved_schema_directory_path
+        resolved_scheme_directory_path
     )
     source_signature = _create_source_signature(
-        resolved_schema_directory_path,
+        resolved_scheme_directory_path,
         all_fasta_file_paths,
     )
     try:
@@ -1272,7 +1286,7 @@ def get_schema_similarity_analysis(
         blastp_version = _get_blast_version(blastp_executable)
     except RuntimeError:
         cached_analysis_without_installed_blast = _read_cached_analysis(
-            schema_directory_path=resolved_schema_directory_path,
+            scheme_directory_path=resolved_scheme_directory_path,
             source_signature=source_signature,
             blastn_version=None,
             blastp_version=None,
@@ -1296,7 +1310,7 @@ def get_schema_similarity_analysis(
         )
         return cached_analysis_without_installed_blast
     cached_analysis = _read_cached_analysis(
-        schema_directory_path=resolved_schema_directory_path,
+        scheme_directory_path=resolved_scheme_directory_path,
         source_signature=source_signature,
         blastn_version=blastn_version,
         blastp_version=blastp_version,
@@ -1321,7 +1335,7 @@ def get_schema_similarity_analysis(
         selected_amino_acid_alleles,
         locus_count,
     ) = _collect_selected_allele_sequences(
-        resolved_schema_directory_path,
+        resolved_scheme_directory_path,
         all_fasta_file_paths,
     )
     _emit_progress(
@@ -1358,7 +1372,7 @@ def get_schema_similarity_analysis(
         amino_acid_thread_count = maximum_thread_count
 
     level_results: dict[str, _SimilarityLevelResult] = {}
-    with tempfile.TemporaryDirectory(prefix="schema-similarity-") as working_directory:
+    with tempfile.TemporaryDirectory(prefix="scheme-similarity-") as working_directory:
         working_directory_path = Path(working_directory)
         level_jobs = (
             (
@@ -1449,7 +1463,7 @@ def get_schema_similarity_analysis(
             for selected_allele in selected_amino_acid_alleles
         }
     )
-    analysis = SchemaSimilarityAnalysis(
+    analysis = SchemeSimilarityAnalysis(
         locus_count=locus_count,
         nucleotide_selected_locus_count=nucleotide_selected_locus_count,
         amino_acid_selected_locus_count=amino_acid_selected_locus_count,
@@ -1469,7 +1483,7 @@ def get_schema_similarity_analysis(
         reused_from_cache=False,
     )
     _write_cached_analysis(
-        schema_directory_path=resolved_schema_directory_path,
+        scheme_directory_path=resolved_scheme_directory_path,
         source_signature=source_signature,
         analysis=analysis,
     )
@@ -1498,15 +1512,18 @@ def main() -> None:
     """Run cross-locus similarity analysis from the command line."""
     argument_parser = argparse.ArgumentParser(description=__doc__)
     argument_parser.add_argument(
-        "schema_directory",
+        "scheme_directory",
         type=Path,
-        help="Extracted schema directory to analyze.",
+        help="Extracted scheme directory to analyze.",
     )
     argument_parser.add_argument(
         "--threads",
         type=_parse_positive_integer,
         default=None,
-        help="Total BLAST thread budget (default: all available CPUs).",
+        help=(
+            "Total BLAST thread budget (default: 80%% of available CPUs, "
+            "rounded down to an even count when possible)."
+        ),
     )
     argument_parser.add_argument(
         "--json",
@@ -1514,8 +1531,8 @@ def main() -> None:
         help="Emit the complete analysis as JSON.",
     )
     parsed_arguments = argument_parser.parse_args()
-    analysis = get_schema_similarity_analysis(
-        parsed_arguments.schema_directory,
+    analysis = get_scheme_similarity_analysis(
+        parsed_arguments.scheme_directory,
         maximum_threads=parsed_arguments.threads,
         progress_output_stream=sys.stderr,
     )
