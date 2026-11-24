@@ -19,25 +19,29 @@ command-line program and can print either a readable summary or JSON.
 import argparse
 import gzip
 import json
-import tempfile
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-FASTA_FILENAME_SUFFIXES = (
-    ".fasta",
-    ".fas",
-    ".fa",
-    ".fna",
-    ".fasta.gz",
-    ".fas.gz",
-    ".fa.gz",
-    ".fna.gz",
+from .cache_io import write_json_atomically
+from .fasta import (
+    FASTA_FILENAME_SUFFIXES,
+    find_locus_fasta_paths,
+    is_fasta_file,
+    iterate_fasta_records,
+    resolve_scheme_directory_path,
 )
-VALID_DNA_BASES = frozenset("ACGT")
-BACTERIAL_START_CODONS = frozenset({"ATG", "GTG", "TTG"})
-STOP_CODONS = frozenset({"TAA", "TAG", "TGA"})
+from .sequence import (
+    BACTERIAL_START_CODONS,
+    STOP_CODONS,
+    VALID_DNA_BASES,
+    NucleotideBaseComposition,
+    contains_in_frame_stop_codon,
+    count_nucleotide_base_composition,
+    evaluate_allele_sequence,
+)
+
 SCHEME_INFORMATION_CACHE_FILENAME = ".scheme-information-cache.json"
 LEGACY_INFORMATION_CACHE_FILENAME = ".schema-information-cache.json"
 SCHEME_INFORMATION_CACHE_FILENAMES = (
@@ -65,72 +69,6 @@ __all__ = [
     "get_scheme_information",
     "is_valid_allele_sequence",
 ]
-
-
-@dataclass(frozen=True)
-class NucleotideBaseComposition:
-    """Canonical and excluded nucleotide-base counts for one or more sequences.
-
-    Attributes:
-        guanine_cytosine_base_count: Number of canonical ``G`` and ``C`` bases.
-        canonical_nucleotide_base_count: Number of ``A``, ``C``, ``G``, and
-            ``T`` bases used as the GC-content denominator.
-        excluded_nucleotide_base_count: Number of non-whitespace characters
-            excluded from the denominator because they are not canonical DNA
-            bases.
-    """
-
-    guanine_cytosine_base_count: int
-    canonical_nucleotide_base_count: int
-    excluded_nucleotide_base_count: int
-
-    @property
-    def guanine_cytosine_content_percentage(self) -> float | None:
-        """Return GC percentage, or ``None`` when no canonical bases exist."""
-        if self.canonical_nucleotide_base_count == 0:
-            return None
-        return (
-            self.guanine_cytosine_base_count
-            / self.canonical_nucleotide_base_count
-            * 100
-        )
-
-
-def count_nucleotide_base_composition(
-    nucleotide_sequence: str,
-) -> NucleotideBaseComposition:
-    """Count bases used by the shared scheme and per-locus GC calculation.
-
-    Whitespace and letter case are ignored. GC content is intentionally based
-    on canonical bases only: ``G`` and ``C`` form the numerator, while
-    ``A``, ``C``, ``G``, and ``T`` form the denominator. Every other
-    non-whitespace character is counted as excluded rather than being assigned
-    fractional nucleotide content.
-
-    Args:
-        nucleotide_sequence: Nucleotide text to summarize.
-
-    Returns:
-        Immutable canonical, GC, and excluded base counts.
-    """
-    normalized_nucleotide_sequence = "".join(nucleotide_sequence.split()).upper()
-    adenine_base_count = normalized_nucleotide_sequence.count("A")
-    cytosine_base_count = normalized_nucleotide_sequence.count("C")
-    guanine_base_count = normalized_nucleotide_sequence.count("G")
-    thymine_base_count = normalized_nucleotide_sequence.count("T")
-    canonical_nucleotide_base_count = (
-        adenine_base_count
-        + cytosine_base_count
-        + guanine_base_count
-        + thymine_base_count
-    )
-    return NucleotideBaseComposition(
-        guanine_cytosine_base_count=(cytosine_base_count + guanine_base_count),
-        canonical_nucleotide_base_count=canonical_nucleotide_base_count,
-        excluded_nucleotide_base_count=(
-            len(normalized_nucleotide_sequence) - canonical_nucleotide_base_count
-        ),
-    )
 
 
 @dataclass(frozen=True)
@@ -253,97 +191,17 @@ class _CachedSchemeAnalysis:
     alleles_above_locus_mode_threshold_count: int
 
 
-def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted scheme directory path.
-
-    Args:
-        scheme_directory_path: Directory containing the extracted scheme.
-
-    Returns:
-        The absolute path to the scheme directory.
-
-    Raises:
-        FileNotFoundError: If the supplied path does not exist.
-        NotADirectoryError: If the supplied path is not a directory.
-    """
-    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
-
-    if not resolved_scheme_directory_path.exists():
-        raise FileNotFoundError(
-            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
-        )
-    if not resolved_scheme_directory_path.is_dir():
-        raise NotADirectoryError(
-            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
-        )
-
-    return resolved_scheme_directory_path
-
-
-def _is_fasta_file(allele_file_path: Path) -> bool:
-    """Return whether a path has a recognized FASTA filename suffix."""
-    lowercase_filename = allele_file_path.name.lower()
-    return allele_file_path.is_file() and lowercase_filename.endswith(
-        FASTA_FILENAME_SUFFIXES
-    )
-
-
-def _find_allele_file_paths(scheme_directory_path: Path) -> tuple[Path, ...]:
-    """Return all recognized FASTA files below a scheme directory."""
-    return tuple(
-        sorted(
-            candidate_file_path
-            for candidate_file_path in scheme_directory_path.rglob("*")
-            if _is_fasta_file(candidate_file_path)
-        )
-    )
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_is_fasta_file = is_fasta_file
+_find_allele_file_paths = find_locus_fasta_paths
 
 
 def _iterate_fasta_sequences(fasta_lines: Iterable[str]) -> Iterable[str]:
     """Yield one assembled nucleotide sequence per FASTA header."""
-    current_sequence_parts: list[str] | None = None
-
-    for fasta_line in fasta_lines:
-        stripped_fasta_line = fasta_line.strip()
-
-        if stripped_fasta_line.startswith(">"):
-            if current_sequence_parts is not None:
-                yield "".join(current_sequence_parts)
-            current_sequence_parts = []
-            continue
-
-        if current_sequence_parts is not None:
-            current_sequence_parts.append(stripped_fasta_line)
-
-    if current_sequence_parts is not None:
-        yield "".join(current_sequence_parts)
+    return (record.sequence for record in iterate_fasta_records(fasta_lines))
 
 
-def _contains_in_frame_stop_codon(normalized_allele_sequence: str) -> bool:
-    """Return whether an allele has a stop codon before its valid endpoint."""
-    final_complete_codon_end_position = len(normalized_allele_sequence) - (
-        len(normalized_allele_sequence) % 3
-    )
-    in_frame_codon_end_position = final_complete_codon_end_position
-
-    has_terminal_stop_codon = (
-        len(normalized_allele_sequence) % 3 == 0
-        and normalized_allele_sequence[-3:] in STOP_CODONS
-    )
-    if has_terminal_stop_codon:
-        in_frame_codon_end_position -= 3
-
-    return any(
-        normalized_allele_sequence[
-            codon_start_position : codon_start_position + 3
-        ]
-        in STOP_CODONS
-        for codon_start_position in range(
-            3,
-            in_frame_codon_end_position,
-            3,
-        )
-    )
+_contains_in_frame_stop_codon = contains_in_frame_stop_codon
 
 
 def _evaluate_allele_sequence(
@@ -352,22 +210,15 @@ def _evaluate_allele_sequence(
 ) -> _AlleleValidationResult:
     """Evaluate all coding-sequence and minimum-length rules for one allele."""
     normalized_allele_sequence = "".join(allele_sequence.split()).upper()
-    has_incomplete_orf = len(normalized_allele_sequence) % 3 != 0
-    has_ambiguous_bases = not set(normalized_allele_sequence).issubset(
-        VALID_DNA_BASES
-    )
-    is_missing_start_or_stop_codon = (
-        normalized_allele_sequence[:3] not in BACTERIAL_START_CODONS
-        or normalized_allele_sequence[-3:] not in STOP_CODONS
-    )
+    shared_validation = evaluate_allele_sequence(normalized_allele_sequence)
 
     return _AlleleValidationResult(
-        has_incomplete_orf=has_incomplete_orf,
-        has_ambiguous_bases=has_ambiguous_bases,
-        is_missing_start_or_stop_codon=is_missing_start_or_stop_codon,
-        has_in_frame_stop_codon=_contains_in_frame_stop_codon(
-            normalized_allele_sequence
+        has_incomplete_orf=shared_validation.has_incomplete_orf,
+        has_ambiguous_bases=shared_validation.has_ambiguous_bases,
+        is_missing_start_or_stop_codon=(
+            shared_validation.is_missing_start_or_stop_codon
         ),
+        has_in_frame_stop_codon=shared_validation.has_in_frame_stop_codon,
         is_below_minimum_length=(
             len(normalized_allele_sequence) < minimum_sequence_length
         ),
@@ -771,22 +622,10 @@ def _write_cached_scheme_analysis(
         scheme_directory_path / SCHEME_INFORMATION_CACHE_FILENAME
     )
 
-    temporary_cache_file_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_INFORMATION_CACHE_FILENAME}.",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cached_analysis_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-
-        temporary_cache_file_path.replace(scheme_information_cache_file_path)
-    finally:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+    write_json_atomically(
+        scheme_information_cache_file_path,
+        cached_analysis_data,
+    )
 
 
 def _get_or_create_cached_scheme_analysis(

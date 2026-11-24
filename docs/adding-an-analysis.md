@@ -3,6 +3,22 @@
 Keep new analyses small, typed, and scientifically explicit. Add ordinary
 library code first; the Marimo notebook should orchestrate and present it.
 
+Use `scheme.fasta` for locus discovery and FASTA records, `scheme.sequence`
+for normalization, CDS validation, translation, and nucleotide composition,
+and `scheme.selection` for modal-length-proximal representative selection.
+Use `scheme.blast` for checked BLAST+ execution, executable-version discovery,
+and temporary database construction, while keeping each analysis's exact
+search arguments, output schema, parser, and scientific interpretation local.
+Use `scheme.cache_io.write_json_atomically` for JSON analysis-cache writes,
+while keeping schema construction, versioning, compatibility, validation, and
+the decision to suppress or propagate persistence failures in the analysis.
+Put reusable Altair specifications and bounded chart projection logic in
+`scheme.charts`. Keep Marimo components, detailed table configuration,
+explanatory prose, and interpretation in the notebook so the visible report
+remains understandable in one place.
+Scientific analyses must not import private helpers from another analysis
+module or introduce a second interpretation of these shared rules.
+
 ## Developer checklist
 
 - Define immutable raw measurement and threshold-dependent classification
@@ -13,10 +29,16 @@ library code first; the Marimo notebook should orchestrate and present it.
 - Keep screening thresholds separate from expensive raw measurements.
 - Define the cache version, scientifically meaningful key fields, provenance,
   atomic-write behavior, and invalidation rules.
+- Expose method/tool and cache-reuse provenance in the typed result when it is
+  available, without adding worker counts or presentation settings to cache
+  identity.
 - Add typed progress reporting when work is expensive enough to require user
   feedback.
 - Add scheme-level summary fields to `scheme/overview.py` when the measurement
   belongs in the intrinsic overview.
+- Add the typed detail table, compact summary fields, provenance, and explicit
+  available/not-run state to `scheme/export.py`; test both partial and complete
+  bundles and update `docs/fair-outputs.md` when the artifact contract changes.
 - Keep detailed rows and plots bounded without changing complete reported
   counts.
 - Add persistent cache filenames to the relevant notebook cache-status group.

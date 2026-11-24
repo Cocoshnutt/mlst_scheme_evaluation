@@ -8,11 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scheme import stats
+from scheme.charts import create_scheme_statistics_charts
 from scheme.stats import (
     SCHEME_STATISTICS_CACHE_FILENAME,
     SCHEME_STATISTICS_CACHE_FILENAMES,
     SCHEME_STATISTICS_CACHE_VERSION,
-    create_scheme_statistics_charts,
     get_scheme_statistics,
 )
 

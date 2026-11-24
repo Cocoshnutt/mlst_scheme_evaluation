@@ -38,21 +38,28 @@ from math import isfinite
 from pathlib import Path
 from typing import TextIO
 
-from .allele_info import _translate_valid_allele
+from .blast import create_blast_database, get_blast_version, run_blast_command
+from .cache_io import write_json_atomically
+from .fasta import (
+    FastaRecord,
+    create_fasta_source_signature,
+    find_locus_fasta_paths,
+    locus_name_from_file_path,
+    read_fasta_records,
+    resolve_scheme_directory_path,
+)
 from .resources import resolve_worker_count
+from .selection import select_allele_closest_to_modal_length
+from .sequence import evaluate_allele_sequence, translate_valid_allele
 from .similarity import (
     DEFAULT_BLAST_EVALUE,
     DEFAULT_SAME_GENE_BLAST_SCORE_RATIO_THRESHOLD,
-    _create_source_signature,
-    _find_all_fasta_file_paths,
-    _get_blast_version,
-    _is_valid_coding_sequence,
-    _locus_name_from_file_path,
-    _read_fasta_records,
-    _resolve_scheme_directory_path,
-    _run_command,
-    _select_allele_closest_to_modal_length,
 )
+
+# Private aliases preserve existing test and downstream patch points while the
+# implementation now lives in the shared operational module.
+_run_command = run_blast_command
+_get_blast_version = get_blast_version
 
 SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME = ".scheme-representative-bsr-cache.json"
 LEGACY_REPRESENTATIVE_BSR_CACHE_FILENAME = (
@@ -90,6 +97,37 @@ __all__ = [
 ]
 
 type _SourceSignature = tuple[tuple[str, int, int], ...]
+
+_create_source_signature = create_fasta_source_signature
+_find_all_fasta_file_paths = find_locus_fasta_paths
+_locus_name_from_file_path = locus_name_from_file_path
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_translate_valid_allele = translate_valid_allele
+
+
+def _read_fasta_records(fasta_file_path: Path) -> tuple[FastaRecord, ...]:
+    """Read FASTA records with the established uppercase BLAST normalization."""
+    return tuple(
+        FastaRecord(record.identifier, record.sequence.upper())
+        for record in read_fasta_records(fasta_file_path)
+    )
+
+
+def _is_valid_coding_sequence(normalized_sequence: str) -> bool:
+    """Return whether a normalized allele passes every CDS rule."""
+    return evaluate_allele_sequence(normalized_sequence).is_valid
+
+
+def _select_allele_closest_to_modal_length(
+    locus_records: tuple[FastaRecord, ...],
+    *,
+    require_valid_coding_sequence: bool,
+) -> FastaRecord | None:
+    """Select a record using the shared deterministic rule."""
+    return select_allele_closest_to_modal_length(
+        locus_records,
+        require_valid_coding_sequence=require_valid_coding_sequence,
+    )
 
 
 @dataclass(frozen=True)
@@ -604,18 +642,12 @@ def _run_blastp_analysis(
     blast_output_file_path = working_directory_path / "representative_hits.tsv"
     _write_protein_fasta(all_proteins_file_path, all_protein_alleles)
     _write_protein_fasta(representatives_file_path, representative_alleles)
-    _run_command(
-        [
-            makeblastdb_executable,
-            "-in",
-            str(all_proteins_file_path),
-            "-dbtype",
-            "prot",
-            "-out",
-            str(database_path),
-            "-parse_seqids",
-        ],
-        "makeblastdb (representative BSR)",
+    create_blast_database(
+        input_fasta_file_path=all_proteins_file_path,
+        database_path=database_path,
+        database_type="prot",
+        makeblastdb_executable=makeblastdb_executable,
+        operation_name="makeblastdb (representative BSR)",
     )
     _run_command(
         [
@@ -945,24 +977,13 @@ def _write_cached_analysis(
             for measurement in analysis.inter_locus_measurements
         ],
     }
-    temporary_cache_file_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cache_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-        temporary_cache_file_path.replace(
-            scheme_directory_path / SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME
+        write_json_atomically(
+            scheme_directory_path / SCHEME_REPRESENTATIVE_BSR_CACHE_FILENAME,
+            cache_data,
         )
     except OSError:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+        pass
 
 
 def _emit_progress(

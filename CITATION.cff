@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it using the metadata in this file.
+title: MLST scheme evaluation
+type: software
+version: 0.1.0
+abstract: >-
+  A reproducible Marimo-based framework for evaluating intrinsic and
+  genome-dependent properties of MLST and cgMLST schemes.
+authors:
+  - family-names: van Eijck
+    given-names: Cos
+    email: cos.van.eijck@rivm.nl
+repository-code: https://github.com/Cocoshnutt/mlst_scheme_evaluation
+license: EUPL-1.2
+keywords:
+  - MLST
+  - cgMLST
+  - microbial genomics
+  - scheme evaluation

@@ -1,12 +1,9 @@
-"""Calculate, cache, and visualize per-locus MLST scheme statistics.
+"""Calculate and cache per-locus MLST scheme statistics.
 
 This module treats each recognized FASTA file in an extracted scheme as one
 locus and summarizes the lengths and nucleotide composition of its allele
-sequences. The public library API returns explicit per-locus statistics and
-creates the four established allele-length Altair panels plus a GC-content
-distribution:
-the allele-count distribution, modal-length distribution, minimum/maximum/
-mean/median lengths per locus, and an interactive box-plot overview.
+sequences. The public library API returns explicit per-locus statistics;
+Altair specifications live separately in :mod:`scheme.charts`.
 
 The cache stores threshold-independent exact-length frequency distributions.
 The notebook can therefore change the descriptive frequent-peak threshold and
@@ -16,21 +13,26 @@ configurable percentage of the dominant exact-length count. This is a project
 heuristic, not a literature-derived quality threshold.
 """
 
-import gzip
 import json
 import math
-import tempfile
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import altair as alt
-
-from .info import (
-    FASTA_FILENAME_SUFFIXES,
+from .cache_io import write_json_atomically
+from .fasta import (
+    create_fasta_source_signature,
+    find_locus_fasta_paths,
+    is_fasta_file,
+    iterate_fasta_records,
+    read_fasta_records,
+    resolve_scheme_directory_path,
+)
+from .sequence import (
     NucleotideBaseComposition,
     count_nucleotide_base_composition,
+    normalize_nucleotide_sequence,
 )
 
 SCHEME_STATISTICS_CACHE_FILENAME = ".scheme-statistics-cache.json"
@@ -42,8 +44,6 @@ SCHEME_STATISTICS_CACHE_FILENAMES = (
 SCHEME_STATISTICS_CACHE_VERSION = 3
 DEFAULT_FREQUENT_PEAK_RELATIVE_THRESHOLD_PERCENTAGE = 50.0
 
-type AltairChart = alt.Chart | alt.LayerChart | alt.VConcatChart
-
 __all__ = [
     "DEFAULT_FREQUENT_PEAK_RELATIVE_THRESHOLD_PERCENTAGE",
     "SCHEME_STATISTICS_CACHE_FILENAME",
@@ -51,8 +51,8 @@ __all__ = [
     "SCHEME_STATISTICS_CACHE_VERSION",
     "AlleleLengthPeak",
     "LocusStatistics",
-    "SchemeStatisticsCharts",
-    "create_scheme_statistics_charts",
+    "LocusStatisticsMeasurements",
+    "calculate_locus_statistics_measurements",
     "get_scheme_statistics",
 ]
 
@@ -132,7 +132,7 @@ class LocusStatistics:
 
 
 @dataclass(frozen=True)
-class _CachedLocusStatistics:
+class LocusStatisticsMeasurements:
     """Threshold-independent per-locus values stored in the cache."""
 
     locus_name: str
@@ -155,96 +155,37 @@ class _CachedLocusStatistics:
     excluded_nucleotide_base_count: int
 
 
-@dataclass(frozen=True)
-class SchemeStatisticsCharts:
-    """The locus-statistics charts displayed by the Marimo report."""
-
-    total_alleles_chart: AltairChart
-    allele_mode_size_chart: AltairChart
-    locus_statistics_chart: AltairChart
-    allele_size_variation_chart: AltairChart
-    guanine_cytosine_content_chart: AltairChart
-
-
-def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted scheme directory.
-
-    Args:
-        scheme_directory_path: Directory containing an extracted MLST scheme.
-
-    Returns:
-        Absolute path to the scheme directory.
-
-    Raises:
-        FileNotFoundError: If the supplied path does not exist.
-        NotADirectoryError: If the supplied path is not a directory.
-    """
-    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
-    if not resolved_scheme_directory_path.exists():
-        raise FileNotFoundError(
-            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
-        )
-    if not resolved_scheme_directory_path.is_dir():
-        raise NotADirectoryError(
-            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
-        )
-    return resolved_scheme_directory_path
-
-
-def _is_fasta_file(candidate_file_path: Path) -> bool:
-    """Return whether a path has a recognized FASTA filename suffix."""
-    lowercase_filename = candidate_file_path.name.lower()
-    return candidate_file_path.is_file() and lowercase_filename.endswith(
-        FASTA_FILENAME_SUFFIXES
-    )
-
-
-def _find_allele_file_paths(
-    scheme_directory_path: Path,
-) -> tuple[Path, ...]:
-    """Return recognized locus FASTA files in deterministic path order."""
-    return tuple(
-        sorted(
-            candidate_file_path
-            for candidate_file_path in scheme_directory_path.rglob("*")
-            if _is_fasta_file(candidate_file_path)
-        )
-    )
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_is_fasta_file = is_fasta_file
+_find_allele_file_paths = find_locus_fasta_paths
 
 
 def _summarize_fasta_lines(
     fasta_lines: Iterable[str],
 ) -> tuple[tuple[int, ...], NucleotideBaseComposition]:
     """Summarize lengths and pooled base composition from FASTA text lines."""
-    current_sequence_length: int | None = None
     allele_lengths: list[int] = []
     guanine_cytosine_base_count = 0
     canonical_nucleotide_base_count = 0
     excluded_nucleotide_base_count = 0
 
-    for fasta_line in fasta_lines:
-        stripped_fasta_line = fasta_line.strip()
-        if stripped_fasta_line.startswith(">"):
-            if current_sequence_length is not None:
-                allele_lengths.append(current_sequence_length)
-            current_sequence_length = 0
-        elif stripped_fasta_line and current_sequence_length is not None:
-            current_sequence_length += len(stripped_fasta_line)
-            nucleotide_base_composition = count_nucleotide_base_composition(
-                stripped_fasta_line
-            )
-            guanine_cytosine_base_count += (
-                nucleotide_base_composition.guanine_cytosine_base_count
-            )
-            canonical_nucleotide_base_count += (
-                nucleotide_base_composition.canonical_nucleotide_base_count
-            )
-            excluded_nucleotide_base_count += (
-                nucleotide_base_composition.excluded_nucleotide_base_count
-            )
-
-    if current_sequence_length is not None:
-        allele_lengths.append(current_sequence_length)
+    for fasta_record in iterate_fasta_records(fasta_lines):
+        normalized_sequence = normalize_nucleotide_sequence(
+            fasta_record.sequence
+        )
+        allele_lengths.append(len(normalized_sequence))
+        nucleotide_base_composition = count_nucleotide_base_composition(
+            normalized_sequence
+        )
+        guanine_cytosine_base_count += (
+            nucleotide_base_composition.guanine_cytosine_base_count
+        )
+        canonical_nucleotide_base_count += (
+            nucleotide_base_composition.canonical_nucleotide_base_count
+        )
+        excluded_nucleotide_base_count += (
+            nucleotide_base_composition.excluded_nucleotide_base_count
+        )
 
     return (
         tuple(allele_lengths),
@@ -260,16 +201,12 @@ def _read_locus_sequence_summary(
     allele_file_path: Path,
 ) -> tuple[tuple[int, ...], NucleotideBaseComposition]:
     """Read allele lengths and pooled base composition from one FASTA file."""
-    if allele_file_path.name.lower().endswith(".gz"):
-        with gzip.open(
-            allele_file_path,
-            mode="rt",
-            encoding="utf-8",
-        ) as allele_file:
-            return _summarize_fasta_lines(allele_file)
-
-    with allele_file_path.open(encoding="utf-8") as allele_file:
-        return _summarize_fasta_lines(allele_file)
+    records = read_fasta_records(allele_file_path)
+    return _summarize_fasta_lines(
+        line
+        for record in records
+        for line in (f">{record.identifier}", record.sequence)
+    )
 
 
 def _calculate_percentile(
@@ -289,14 +226,14 @@ def _calculate_percentile(
     return lower_value + (upper_value - lower_value) * interpolation_fraction
 
 
-def _calculate_locus_statistics(
+def calculate_locus_statistics_measurements(
     locus_name: str,
     allele_lengths: tuple[int, ...],
     nucleotide_base_composition: NucleotideBaseComposition,
-) -> _CachedLocusStatistics:
+) -> LocusStatisticsMeasurements:
     """Calculate threshold-independent length and GC statistics for one locus."""
     if not allele_lengths:
-        return _CachedLocusStatistics(
+        return LocusStatisticsMeasurements(
             locus_name=locus_name,
             allele_count=0,
             modal_allele_length=None,
@@ -369,7 +306,7 @@ def _calculate_locus_statistics(
         if allele_length <= upper_fence
     )
 
-    return _CachedLocusStatistics(
+    return LocusStatisticsMeasurements(
         locus_name=locus_name,
         allele_count=len(sorted_allele_lengths),
         modal_allele_length=modal_allele_length,
@@ -416,7 +353,7 @@ def _validate_frequent_peak_relative_threshold_percentage(
 
 
 def _materialize_locus_statistics(
-    cached_locus_statistics: _CachedLocusStatistics,
+    cached_locus_statistics: LocusStatisticsMeasurements,
     frequent_peak_relative_threshold_percentage: float,
 ) -> LocusStatistics:
     """Apply a peak threshold to cached exact-length frequencies."""
@@ -516,30 +453,13 @@ def _materialize_locus_statistics(
     )
 
 
-def _create_source_signature(
-    scheme_directory_path: Path,
-    allele_file_paths: Iterable[Path],
-) -> tuple[tuple[str, int, int], ...]:
-    """Create a metadata signature used to invalidate stale statistics."""
-    source_signature: list[tuple[str, int, int]] = []
-    for allele_file_path in allele_file_paths:
-        allele_file_status = allele_file_path.stat()
-        source_signature.append(
-            (
-                allele_file_path.relative_to(
-                    scheme_directory_path
-                ).as_posix(),
-                allele_file_status.st_size,
-                allele_file_status.st_mtime_ns,
-            )
-        )
-    return tuple(source_signature)
+_create_source_signature = create_fasta_source_signature
 
 
 def _read_cached_scheme_statistics(
     scheme_directory_path: Path,
     source_signature: tuple[tuple[str, int, int], ...],
-) -> tuple[_CachedLocusStatistics, ...] | None:
+) -> tuple[LocusStatisticsMeasurements, ...] | None:
     """Read a compatible statistics cache, or return ``None``."""
     cache_file_path = next(
         (
@@ -563,7 +483,7 @@ def _read_cached_scheme_statistics(
             return None
 
         return tuple(
-            _CachedLocusStatistics(
+            LocusStatisticsMeasurements(
                 locus_name=str(locus_data["locus_name"]),
                 allele_count=int(locus_data["allele_count"]),
                 modal_allele_length=_optional_integer(
@@ -638,7 +558,7 @@ def _optional_float(value: object) -> float | None:
 def _write_cached_scheme_statistics(
     scheme_directory_path: Path,
     source_signature: tuple[tuple[str, int, int], ...],
-    locus_statistics: tuple[_CachedLocusStatistics, ...],
+    locus_statistics: tuple[LocusStatisticsMeasurements, ...],
 ) -> None:
     """Atomically write calculated locus statistics to the scheme cache."""
     cached_data = {
@@ -648,24 +568,10 @@ def _write_cached_scheme_statistics(
             asdict(locus_information) for locus_information in locus_statistics
         ],
     }
-    temporary_cache_file_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_STATISTICS_CACHE_FILENAME}.",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cached_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-
-        temporary_cache_file_path.replace(
-            scheme_directory_path / SCHEME_STATISTICS_CACHE_FILENAME
-        )
-    finally:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+    write_json_atomically(
+        scheme_directory_path / SCHEME_STATISTICS_CACHE_FILENAME,
+        cached_data,
+    )
 
 
 def get_scheme_statistics(
@@ -724,7 +630,7 @@ def get_scheme_statistics(
         resolved_scheme_directory_path
     )
     cached_locus_statistics = tuple(
-        _CachedLocusStatistics(
+        LocusStatisticsMeasurements(
             locus_name=locus_analysis.relative_file_path,
             allele_count=locus_analysis.allele_count,
             modal_allele_length=locus_analysis.modal_allele_length,
@@ -781,286 +687,4 @@ def get_scheme_statistics(
             frequent_peak_relative_threshold_percentage,
         )
         for locus_statistics in cached_locus_statistics
-    )
-
-
-def _apply_chart_style(chart: AltairChart) -> AltairChart:
-    """Apply shared sizing and typography to a statistics chart."""
-    return (
-        chart.configure_view(stroke=None)
-        .configure_axis(labelFont="Inter", titleFont="Inter")
-        .configure_title(font="Inter", anchor="start", fontSize=18)
-        .configure_legend(labelFont="Inter", titleFont="Inter")
-    )
-
-
-def create_scheme_statistics_charts(
-    locus_statistics: Iterable[LocusStatistics],
-) -> SchemeStatisticsCharts:
-    """Create the four Altair locus-statistics panels.
-
-    Args:
-        locus_statistics: Per-locus statistics returned by
-            :func:`get_scheme_statistics`.
-
-    Returns:
-        Styled Altair charts corresponding to panels A through D and the
-        per-locus GC-content distribution.
-    """
-    ordered_locus_statistics = tuple(locus_statistics)
-    # Keep chart datasets deliberately narrow. Embedding the complete public
-    # dataclass would copy tied modes and peak records into every chart layer,
-    # producing multi-megabyte Marimo outputs for large schemes.
-    locus_rows = [
-        {
-            "locus_index": locus_index,
-            "locus_name": locus_information.locus_name,
-            "allele_count": locus_information.allele_count,
-            "modal_allele_length": locus_information.modal_allele_length,
-            "mean_allele_length": locus_information.mean_allele_length,
-            "minimum_allele_length": locus_information.minimum_allele_length,
-            "first_quartile_allele_length": (
-                locus_information.first_quartile_allele_length
-            ),
-            "median_allele_length": locus_information.median_allele_length,
-            "third_quartile_allele_length": (
-                locus_information.third_quartile_allele_length
-            ),
-            "maximum_allele_length": locus_information.maximum_allele_length,
-            "lower_whisker_allele_length": (
-                locus_information.lower_whisker_allele_length
-            ),
-            "upper_whisker_allele_length": (
-                locus_information.upper_whisker_allele_length
-            ),
-            "guanine_cytosine_content_percentage": (
-                locus_information.guanine_cytosine_content_percentage
-            ),
-        }
-        for locus_index, locus_information in enumerate(
-            ordered_locus_statistics,
-            start=1,
-        )
-    ]
-    nonempty_locus_rows = [
-        locus_row
-        for locus_row in locus_rows
-        if locus_row["allele_count"] > 0
-    ]
-    total_allele_rows = [
-        {"allele_count": locus_row["allele_count"]}
-        for locus_row in locus_rows
-    ]
-    modal_allele_length_rows = [
-        {"modal_allele_length": locus_row["modal_allele_length"]}
-        for locus_row in nonempty_locus_rows
-    ]
-    guanine_cytosine_content_rows = [
-        {
-            "guanine_cytosine_content_percentage": locus_row[
-                "guanine_cytosine_content_percentage"
-            ]
-        }
-        for locus_row in locus_rows
-        if locus_row["guanine_cytosine_content_percentage"] is not None
-    ]
-
-    total_alleles_chart = _apply_chart_style(
-        alt.Chart(alt.Data(values=total_allele_rows))
-        .mark_bar(color="#4C78A8")
-        .encode(
-            x=alt.X(
-                "allele_count:Q",
-                bin=alt.Bin(maxbins=30),
-                title="Alleles per locus",
-            ),
-            y=alt.Y("count():Q", title="Number of loci"),
-            tooltip=[
-                alt.Tooltip("allele_count:Q", bin=True, title="Allele range"),
-                alt.Tooltip("count():Q", title="Loci"),
-            ],
-        )
-        .properties(title="Panel A · Total Alleles", width=1100, height=280)
-    )
-
-    allele_mode_size_chart = _apply_chart_style(
-        alt.Chart(alt.Data(values=modal_allele_length_rows))
-        .mark_bar(color="#72B7B2")
-        .encode(
-            x=alt.X(
-                "modal_allele_length:Q",
-                bin=alt.Bin(maxbins=30),
-                title="Modal allele length (bp)",
-            ),
-            y=alt.Y("count():Q", title="Number of loci"),
-            tooltip=[
-                alt.Tooltip(
-                    "modal_allele_length:Q",
-                    bin=True,
-                    title="Mode-size range",
-                ),
-                alt.Tooltip("count():Q", title="Loci"),
-            ],
-        )
-        .properties(title="Panel B · Allele Mode Size", width=1100, height=280)
-    )
-
-    locus_length_rows = [
-        {
-            "locus_index": locus_row["locus_index"],
-            "locus_name": locus_row["locus_name"],
-            "allele_count": locus_row["allele_count"],
-            "length_statistic": length_statistic,
-            "allele_length": locus_row[field_name],
-        }
-        for locus_row in nonempty_locus_rows
-        for length_statistic, field_name in (
-            ("Minimum", "minimum_allele_length"),
-            ("Maximum", "maximum_allele_length"),
-            ("Mean", "mean_allele_length"),
-            ("Median", "median_allele_length"),
-        )
-    ]
-    locus_statistics_chart = _apply_chart_style(
-        alt.Chart(alt.Data(values=locus_length_rows))
-        .mark_circle(size=35, opacity=0.8)
-        .encode(
-            x=alt.X("allele_length:Q", title="Allele size (bp)"),
-            y=alt.Y("allele_count:Q", title="Number of alleles"),
-            color=alt.Color(
-                "length_statistic:N",
-                title="Statistic",
-                scale=alt.Scale(
-                    domain=["Minimum", "Maximum", "Mean", "Median"],
-                    range=["#4C78A8", "#F58518", "#B279A2", "#54A24B"],
-                ),
-            ),
-            tooltip=[
-                alt.Tooltip("locus_name:N", title="Locus"),
-                alt.Tooltip("length_statistic:N", title="Statistic"),
-                alt.Tooltip("allele_length:Q", title="Allele size (bp)"),
-                alt.Tooltip("allele_count:Q", title="Number of alleles"),
-            ],
-        )
-        .properties(title="Panel C · Locus Statistics", width=1100, height=320)
-        .interactive(bind_y=False)
-    )
-
-    visible_locus_interval = alt.selection_interval(
-        name="visible_locus_interval",
-        encodings=["x"],
-    )
-    box_plot_base = alt.Chart(alt.Data(values=nonempty_locus_rows)).encode(
-        x=alt.X(
-            "locus_index:Q",
-            title="Locus index",
-            scale=alt.Scale(domain=visible_locus_interval),
-        ),
-        tooltip=[
-            alt.Tooltip("locus_name:N", title="Locus"),
-            alt.Tooltip("allele_count:Q", title="Alleles"),
-            alt.Tooltip(
-                "minimum_allele_length:Q",
-                title="Minimum (bp)",
-            ),
-            alt.Tooltip(
-                "first_quartile_allele_length:Q",
-                title="Q1 (bp)",
-                format=".1f",
-            ),
-            alt.Tooltip(
-                "median_allele_length:Q",
-                title="Median (bp)",
-                format=".1f",
-            ),
-            alt.Tooltip(
-                "third_quartile_allele_length:Q",
-                title="Q3 (bp)",
-                format=".1f",
-            ),
-            alt.Tooltip(
-                "maximum_allele_length:Q",
-                title="Maximum (bp)",
-            ),
-        ],
-    )
-    whisker_chart = box_plot_base.mark_rule(
-        color="#00BFFF",
-        strokeWidth=2,
-    ).encode(
-        y=alt.Y(
-            "lower_whisker_allele_length:Q",
-            title="Allele length (bp)",
-        ),
-        y2="upper_whisker_allele_length:Q",
-    )
-    quartile_box_chart = box_plot_base.mark_bar(
-        color="#72B7B2",
-        size=10,
-    ).encode(
-        y="first_quartile_allele_length:Q",
-        y2="third_quartile_allele_length:Q",
-    )
-    median_tick_chart = box_plot_base.mark_tick(
-        color="#FFB000",
-        size=12,
-        thickness=2,
-    ).encode(y="median_allele_length:Q")
-    box_plot_chart = (
-        (whisker_chart + quartile_box_chart + median_tick_chart)
-        .transform_filter(visible_locus_interval)
-        .properties(width=1100, height=320)
-    )
-    range_selector_chart = (
-        alt.Chart(alt.Data(values=nonempty_locus_rows))
-        .mark_area(color="#BFD7EA")
-        .encode(
-            x=alt.X("locus_index:Q", title="Drag to select visible loci"),
-            y=alt.Y("allele_count:Q", title=None, axis=None),
-        )
-        .add_params(visible_locus_interval)
-        .properties(width=900, height=55)
-    )
-    allele_size_variation_chart = _apply_chart_style(
-        alt.vconcat(
-            box_plot_chart,
-            range_selector_chart,
-            title="Panel D · Allele Size Variation",
-        ).resolve_scale(x="independent")
-    )
-
-    guanine_cytosine_content_chart = _apply_chart_style(
-        alt.Chart(alt.Data(values=guanine_cytosine_content_rows))
-        .mark_bar(color="#59A14F")
-        .encode(
-            x=alt.X(
-                "guanine_cytosine_content_percentage:Q",
-                bin=alt.Bin(maxbins=30),
-                scale=alt.Scale(domain=[0, 100]),
-                title="GC content (%)",
-            ),
-            y=alt.Y("count():Q", title="Number of loci"),
-            tooltip=[
-                alt.Tooltip(
-                    "guanine_cytosine_content_percentage:Q",
-                    bin=True,
-                    title="GC-content range (%)",
-                    format=".2f",
-                ),
-                alt.Tooltip("count():Q", title="Loci"),
-            ],
-        )
-        .properties(
-            title="Per-locus GC Content",
-            width=1100,
-            height=280,
-        )
-    )
-
-    return SchemeStatisticsCharts(
-        total_alleles_chart=total_alleles_chart,
-        allele_mode_size_chart=allele_mode_size_chart,
-        locus_statistics_chart=locus_statistics_chart,
-        allele_size_variation_chart=allele_size_variation_chart,
-        guanine_cytosine_content_chart=guanine_cytosine_content_chart,
     )

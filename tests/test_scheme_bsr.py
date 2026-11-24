@@ -402,7 +402,7 @@ class RepresentativeBsrIntegrationTest(unittest.TestCase):
             )
             cached_analysis = get_scheme_representative_bsr_analysis(
                 scheme_directory_path,
-                maximum_threads=1,
+                maximum_threads=2,
             )
             classification = classify_representative_bsr_analysis(analysis)
 

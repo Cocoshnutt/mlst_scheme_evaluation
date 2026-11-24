@@ -107,8 +107,8 @@ class ExpensiveAnalysisCacheFailureTest(unittest.TestCase):
             reused_from_cache=False,
         )
         with tempfile.TemporaryDirectory() as temporary_directory, patch.object(
-            similarity.tempfile,
-            "NamedTemporaryFile",
+            similarity,
+            "write_json_atomically",
             side_effect=PermissionError("read-only scheme"),
         ):
             similarity._write_cached_analysis(
@@ -128,8 +128,8 @@ class ExpensiveAnalysisCacheFailureTest(unittest.TestCase):
             reused_from_cache=False,
         )
         with tempfile.TemporaryDirectory() as temporary_directory, patch.object(
-            bsr.tempfile,
-            "NamedTemporaryFile",
+            bsr,
+            "write_json_atomically",
             side_effect=PermissionError("read-only scheme"),
         ):
             bsr._write_cached_analysis(

@@ -48,12 +48,9 @@ typed progress callback for notebook and terminal monitoring.
 """
 
 import argparse
-import gzip
 import json
-import subprocess
 import sys
 import tempfile
-from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
@@ -61,10 +58,27 @@ from math import isfinite
 from pathlib import Path
 from typing import TextIO
 
-from .alignment import IUPAC_DNA_BASES
-from .allele_info import _evaluate_allele_sequence, _translate_valid_allele
-from .info import FASTA_FILENAME_SUFFIXES
+from .blast import create_blast_database, get_blast_version, run_blast_command
+from .cache_io import write_json_atomically
+from .fasta import (
+    FastaRecord,
+    FastaSourceSignature,
+    create_fasta_source_signature,
+    find_locus_fasta_paths,
+    is_fasta_file,
+    iterate_fasta_records,
+    locus_name_from_file_path,
+    read_fasta_records,
+    remove_fasta_filename_suffix,
+    resolve_scheme_directory_path,
+)
 from .resources import resolve_worker_count
+from .selection import select_allele_closest_to_modal_length
+from .sequence import (
+    evaluate_allele_sequence,
+    is_eligible_iupac_dna_sequence,
+    translate_valid_allele,
+)
 
 SCHEME_SIMILARITY_CACHE_FILENAME = ".scheme-similarity-cache.json"
 LEGACY_SIMILARITY_CACHE_FILENAME = ".schema-similarity-cache.json"
@@ -491,12 +505,7 @@ class SimilarityProgress:
     reused_from_cache: bool = False
 
 
-@dataclass(frozen=True)
-class _FastaRecord:
-    """One normalized FASTA record."""
-
-    identifier: str
-    sequence: str
+_FastaRecord = FastaRecord
 
 
 @dataclass(frozen=True)
@@ -535,109 +544,58 @@ class _SimilarityLevelResult:
     matches: tuple[CrossLocusSimilarityMatch, ...]
 
 
-type _SourceSignature = tuple[tuple[str, int, int], ...]
+type _SourceSignature = FastaSourceSignature
 type SimilarityProgressCallback = Callable[[SimilarityProgress], None]
 
 
-def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted scheme directory."""
-    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
-    if not resolved_scheme_directory_path.exists():
-        raise FileNotFoundError(
-            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
-        )
-    if not resolved_scheme_directory_path.is_dir():
-        raise NotADirectoryError(
-            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
-        )
-    return resolved_scheme_directory_path
-
-
-def _is_fasta_file(candidate_file_path: Path) -> bool:
-    """Return whether a path is a recognized FASTA file."""
-    return candidate_file_path.is_file() and candidate_file_path.name.lower().endswith(
-        FASTA_FILENAME_SUFFIXES
-    )
-
-
-def _find_all_fasta_file_paths(scheme_directory_path: Path) -> tuple[Path, ...]:
-    """Return every recognized locus FASTA in deterministic path order."""
-    return tuple(
-        sorted(
-            candidate_file_path
-            for candidate_file_path in scheme_directory_path.rglob("*")
-            if _is_fasta_file(candidate_file_path)
-        )
-    )
-
-def _remove_fasta_filename_suffix(relative_file_path: str) -> str:
-    """Remove a recognized FASTA suffix from a relative path."""
-    lowercase_relative_file_path = relative_file_path.lower()
-    for filename_suffix in sorted(FASTA_FILENAME_SUFFIXES, key=len, reverse=True):
-        if lowercase_relative_file_path.endswith(filename_suffix):
-            return relative_file_path[: -len(filename_suffix)]
-    return relative_file_path
-
-
-def _locus_name_from_file_path(
-    scheme_directory_path: Path,
-    locus_file_path: Path,
-) -> str:
-    """Return the scheme-relative locus name without its FASTA suffix."""
-    relative_file_path = locus_file_path.relative_to(scheme_directory_path).as_posix()
-    return _remove_fasta_filename_suffix(relative_file_path)
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_is_fasta_file = is_fasta_file
+_find_all_fasta_file_paths = find_locus_fasta_paths
+_remove_fasta_filename_suffix = remove_fasta_filename_suffix
+_locus_name_from_file_path = locus_name_from_file_path
 
 def _iterate_fasta_records(fasta_lines: Iterable[str]) -> Iterable[_FastaRecord]:
     """Yield normalized identifiers and sequences from FASTA text."""
-    current_identifier: str | None = None
-    current_sequence_parts: list[str] = []
-    for fasta_line in fasta_lines:
-        stripped_fasta_line = fasta_line.strip()
-        if stripped_fasta_line.startswith(">"):
-            if current_identifier is not None:
-                yield _FastaRecord(
-                    current_identifier,
-                    "".join(current_sequence_parts).upper(),
-                )
-            current_identifier = stripped_fasta_line[1:].split(maxsplit=1)[0]
-            current_sequence_parts = []
-        elif stripped_fasta_line and current_identifier is not None:
-            current_sequence_parts.append(stripped_fasta_line)
-
-    if current_identifier is not None:
-        yield _FastaRecord(
-            current_identifier,
-            "".join(current_sequence_parts).upper(),
-        )
+    return (
+        FastaRecord(record.identifier, record.sequence.upper())
+        for record in iterate_fasta_records(fasta_lines)
+    )
 
 
 def _read_fasta_records(fasta_file_path: Path) -> tuple[_FastaRecord, ...]:
     """Read normalized FASTA records from plain text or gzip input."""
-    if fasta_file_path.name.lower().endswith(".gz"):
-        with gzip.open(fasta_file_path, mode="rt", encoding="utf-8") as fasta_file:
-            return tuple(_iterate_fasta_records(fasta_file))
-    with fasta_file_path.open(encoding="utf-8") as fasta_file:
-        return tuple(_iterate_fasta_records(fasta_file))
+    return tuple(
+        FastaRecord(record.identifier, record.sequence.upper())
+        for record in read_fasta_records(fasta_file_path)
+    )
 
 
 def _is_valid_coding_sequence(normalized_sequence: str) -> bool:
     """Reuse the repository's four coding-sequence validation rules."""
-    validation = _evaluate_allele_sequence(normalized_sequence)
-    return not any(
-        (
-            validation.has_incomplete_orf,
-            validation.has_ambiguous_bases,
-            validation.is_missing_start_or_stop_codon,
-            validation.has_in_frame_stop_codon,
-        )
-    )
+    return evaluate_allele_sequence(normalized_sequence).is_valid
 
 
 def _is_eligible_nucleotide_sequence(normalized_sequence: str) -> bool:
     """Return whether a non-empty sequence contains standard IUPAC DNA."""
-    return bool(normalized_sequence) and set(normalized_sequence).issubset(
-        IUPAC_DNA_BASES
+    return is_eligible_iupac_dna_sequence(normalized_sequence)
+
+
+_translate_valid_allele = translate_valid_allele
+
+
+def _select_allele_closest_to_modal_length(
+    locus_records: tuple[_FastaRecord, ...],
+    *,
+    require_valid_coding_sequence: bool,
+) -> _FastaRecord | None:
+    """Select an eligible allele using the shared deterministic rule."""
+    return select_allele_closest_to_modal_length(
+        locus_records,
+        require_valid_coding_sequence=require_valid_coding_sequence,
     )
+
+
+_create_source_signature = create_fasta_source_signature
 
 
 def _create_selected_allele_sequence(
@@ -660,45 +618,6 @@ def _create_selected_allele_sequence(
     )
 
 
-def _select_allele_closest_to_modal_length(
-    locus_records: tuple[_FastaRecord, ...],
-    *,
-    require_valid_coding_sequence: bool,
-) -> _FastaRecord | None:
-    """Select an eligible allele closest to the shortest tied length mode.
-
-    The mode uses every non-empty allele in the locus, including records that
-    are not valid coding sequences. The selected record must either pass all
-    coding-sequence rules or, for the nucleotide-only fallback, contain only
-    standard IUPAC DNA symbols. Equal distances retain original FASTA order.
-    """
-    non_empty_allele_lengths = [
-        len(record.sequence) for record in locus_records if record.sequence
-    ]
-    if not non_empty_allele_lengths:
-        return None
-    length_counts = Counter(non_empty_allele_lengths)
-    highest_length_frequency = max(length_counts.values())
-    modal_allele_length = min(
-        allele_length
-        for allele_length, frequency in length_counts.items()
-        if frequency == highest_length_frequency
-    )
-    for _, fasta_record in sorted(
-        enumerate(locus_records),
-        key=lambda indexed_record: (
-            abs(len(indexed_record[1].sequence) - modal_allele_length),
-            indexed_record[0],
-        ),
-    ):
-        is_eligible = (
-            _is_valid_coding_sequence(fasta_record.sequence)
-            if require_valid_coding_sequence
-            else _is_eligible_nucleotide_sequence(fasta_record.sequence)
-        )
-        if is_eligible:
-            return fasta_record
-    return None
 
 
 def _collect_selected_allele_sequences(
@@ -759,60 +678,10 @@ def _collect_selected_allele_sequences(
     )
 
 
-def _create_source_signature(
-    scheme_directory_path: Path,
-    fasta_file_paths: Iterable[Path],
-) -> _SourceSignature:
-    """Create a path, size, and modification-time FASTA signature."""
-    return tuple(
-        (
-            fasta_file_path.relative_to(scheme_directory_path).as_posix(),
-            fasta_file_path.stat().st_size,
-            fasta_file_path.stat().st_mtime_ns,
-        )
-        for fasta_file_path in fasta_file_paths
-    )
-
-
-def _run_command(command_arguments: list[str], operation_name: str) -> None:
-    """Run one BLAST+ command and raise a concise error on failure."""
-    try:
-        completed_process = subprocess.run(
-            command_arguments,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as error:
-        raise RuntimeError(
-            f"{operation_name} executable was not found: {command_arguments[0]}"
-        ) from error
-    if completed_process.returncode != 0:
-        error_message = completed_process.stderr.strip() or completed_process.stdout.strip()
-        raise RuntimeError(
-            f"{operation_name} failed with exit code "
-            f"{completed_process.returncode}: {error_message}"
-        )
-
-
-def _get_blast_version(blast_executable: str) -> str:
-    """Return the first version line emitted by a BLAST executable."""
-    try:
-        completed_process = subprocess.run(
-            [blast_executable, "-version"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as error:
-        raise RuntimeError(f"BLAST executable was not found: {blast_executable}") from error
-    if completed_process.returncode != 0:
-        error_message = completed_process.stderr.strip() or completed_process.stdout.strip()
-        raise RuntimeError(
-            f"Could not determine the version of {blast_executable}: {error_message}"
-        )
-    version_lines = completed_process.stdout.strip().splitlines()
-    return version_lines[0] if version_lines else f"{blast_executable} version unknown"
+# Private aliases preserve existing test and downstream patch points while the
+# implementation now lives in the shared operational module.
+_run_command = run_blast_command
+_get_blast_version = get_blast_version
 
 
 def _write_selected_allele_fasta(
@@ -1001,18 +870,12 @@ def _run_similarity_level(
     database_path = working_directory_path / f"{sequence_level}_database"
     blast_output_file_path = working_directory_path / f"{sequence_level}.tsv"
     _write_selected_allele_fasta(input_fasta_file_path, selected_alleles)
-    _run_command(
-        [
-            makeblastdb_executable,
-            "-in",
-            str(input_fasta_file_path),
-            "-dbtype",
-            database_type,
-            "-out",
-            str(database_path),
-            "-parse_seqids",
-        ],
-        f"makeblastdb ({sequence_level})",
+    create_blast_database(
+        input_fasta_file_path=input_fasta_file_path,
+        database_path=database_path,
+        database_type=database_type,
+        makeblastdb_executable=makeblastdb_executable,
+        operation_name=f"makeblastdb ({sequence_level})",
     )
     _run_command(
         [
@@ -1190,24 +1053,13 @@ def _write_cached_analysis(
         ),
         "matches": [asdict(match) for match in analysis.matches],
     }
-    temporary_cache_file_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_SIMILARITY_CACHE_FILENAME}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cache_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-        temporary_cache_file_path.replace(
-            scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAME
+        write_json_atomically(
+            scheme_directory_path / SCHEME_SIMILARITY_CACHE_FILENAME,
+            cache_data,
         )
     except OSError:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+        pass
 
 
 def _resolve_maximum_threads(maximum_threads: int | None) -> int:

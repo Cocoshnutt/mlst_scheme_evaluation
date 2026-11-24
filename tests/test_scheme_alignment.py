@@ -480,7 +480,12 @@ class AlignmentCacheTest(unittest.TestCase):
         self.assertEqual(
             fft_ns_1_analysis.alignment_strategy, ALIGNMENT_STRATEGY_FFT_NS_1
         )
-        self.assertEqual(reused_fft_ns_2_analysis, fft_ns_2_analysis)
+        self.assertEqual(
+            reused_fft_ns_2_analysis.locus_statistics,
+            fft_ns_2_analysis.locus_statistics,
+        )
+        self.assertEqual(reused_fft_ns_2_analysis.reused_locus_count, 1)
+        self.assertEqual(reused_fft_ns_2_analysis.calculated_locus_count, 0)
         self.assertEqual(
             set(cached_data["methods"]),
             {
@@ -532,11 +537,18 @@ class AlignmentCacheTest(unittest.TestCase):
             ):
                 cached_analysis = get_scheme_alignment_analysis(
                     scheme_directory_path,
-                    maximum_parallel_loci=1,
+                    maximum_parallel_loci=2,
                     progress_output_stream=None,
                 )
 
-        self.assertEqual(cached_analysis, initial_analysis)
+        self.assertEqual(
+            cached_analysis.locus_statistics,
+            initial_analysis.locus_statistics,
+        )
+        self.assertEqual(initial_analysis.reused_locus_count, 0)
+        self.assertEqual(initial_analysis.calculated_locus_count, 1)
+        self.assertEqual(cached_analysis.reused_locus_count, 1)
+        self.assertEqual(cached_analysis.calculated_locus_count, 0)
 
     def test_invalid_worker_count_is_rejected_on_cache_miss(self) -> None:
         """Reject nonsensical concurrency without invoking MAFFT."""
@@ -1204,7 +1216,7 @@ class AlignmentCacheTest(unittest.TestCase):
                     return_value=_make_locus_statistics("beta"),
                 ),
             ):
-                get_scheme_alignment_analysis(
+                partial_analysis = get_scheme_alignment_analysis(
                     scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
@@ -1216,7 +1228,7 @@ class AlignmentCacheTest(unittest.TestCase):
                 "scheme.alignment._get_mafft_version",
                 side_effect=AssertionError("MAFFT version was requested"),
             ):
-                get_scheme_alignment_analysis(
+                cached_analysis = get_scheme_alignment_analysis(
                     scheme_directory_path,
                     maximum_parallel_loci=1,
                     progress_output_stream=None,
@@ -1228,9 +1240,13 @@ class AlignmentCacheTest(unittest.TestCase):
         self.assertIsNone(partial_progress[0].current_locus_name)
         self.assertEqual(partial_progress[-1].completed_locus_count, 2)
         self.assertEqual(partial_progress[-1].current_locus_name, "beta")
+        self.assertEqual(partial_analysis.reused_locus_count, 1)
+        self.assertEqual(partial_analysis.calculated_locus_count, 1)
         self.assertEqual(len(cached_progress), 1)
         self.assertEqual(cached_progress[0].completed_locus_count, 2)
         self.assertEqual(cached_progress[0].cached_locus_count, 2)
+        self.assertEqual(cached_analysis.reused_locus_count, 2)
+        self.assertEqual(cached_analysis.calculated_locus_count, 0)
 
     def test_scheduler_handles_five_hundred_loci(self) -> None:
         """Schedule a cgMLST-sized batch while preserving deterministic order."""

@@ -369,6 +369,8 @@ class FunctionalNotebookContractTest(unittest.TestCase):
             for function_node in _notebook_cell_nodes()
             if "intrinsic_scheme_overview"
             in {argument.arg for argument in function_node.args.args}
+            and "create_intrinsic_evaluation_bundle"
+            not in _called_function_names(function_node)
         ]
         self.assertEqual(len(overview_render_cells), 1)
         first_expensive_control_line = min(

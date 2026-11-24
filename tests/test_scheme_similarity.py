@@ -754,7 +754,7 @@ class BlastIntegrationTest(unittest.TestCase):
             )
             cached_analysis = get_scheme_similarity_analysis(
                 scheme_directory_path,
-                maximum_threads=2,
+                maximum_threads=1,
             )
 
         self.assertEqual(analysis.nucleotide_match_count, 2)

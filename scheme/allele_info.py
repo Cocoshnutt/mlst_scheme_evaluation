@@ -13,19 +13,28 @@ Python code.
 """
 
 import argparse
-import gzip
 import json
-import tempfile
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .info import (
-    BACTERIAL_START_CODONS,
-    FASTA_FILENAME_SUFFIXES,
-    STOP_CODONS,
-    VALID_DNA_BASES,
+from .cache_io import write_json_atomically
+from .fasta import (
+    create_fasta_source_signature,
+    find_locus_fasta_paths,
+    is_fasta_file,
+    iterate_fasta_records,
+    read_fasta_records,
+    remove_fasta_filename_suffix,
+    resolve_scheme_directory_path,
+)
+from .sequence import (
+    CODON_TO_AMINO_ACID,
+    AlleleSequenceValidation,
+    contains_in_frame_stop_codon,
+    evaluate_allele_sequence,
+    translate_valid_allele,
 )
 
 SCHEME_ALLELE_INFORMATION_CACHE_FILENAME = ".scheme-allele-information-cache.json"
@@ -33,73 +42,6 @@ SCHEME_ALLELE_INFORMATION_CACHE_FILENAMES = (
     SCHEME_ALLELE_INFORMATION_CACHE_FILENAME,
 )
 SCHEME_ALLELE_INFORMATION_CACHE_VERSION = 6
-
-CODON_TO_AMINO_ACID = {
-    "AAA": "K",
-    "AAC": "N",
-    "AAG": "K",
-    "AAT": "N",
-    "ACA": "T",
-    "ACC": "T",
-    "ACG": "T",
-    "ACT": "T",
-    "AGA": "R",
-    "AGC": "S",
-    "AGG": "R",
-    "AGT": "S",
-    "ATA": "I",
-    "ATC": "I",
-    "ATG": "M",
-    "ATT": "I",
-    "CAA": "Q",
-    "CAC": "H",
-    "CAG": "Q",
-    "CAT": "H",
-    "CCA": "P",
-    "CCC": "P",
-    "CCG": "P",
-    "CCT": "P",
-    "CGA": "R",
-    "CGC": "R",
-    "CGG": "R",
-    "CGT": "R",
-    "CTA": "L",
-    "CTC": "L",
-    "CTG": "L",
-    "CTT": "L",
-    "GAA": "E",
-    "GAC": "D",
-    "GAG": "E",
-    "GAT": "D",
-    "GCA": "A",
-    "GCC": "A",
-    "GCG": "A",
-    "GCT": "A",
-    "GGA": "G",
-    "GGC": "G",
-    "GGG": "G",
-    "GGT": "G",
-    "GTA": "V",
-    "GTC": "V",
-    "GTG": "V",
-    "GTT": "V",
-    "TAA": "*",
-    "TAC": "Y",
-    "TAG": "*",
-    "TAT": "Y",
-    "TCA": "S",
-    "TCC": "S",
-    "TCG": "S",
-    "TCT": "S",
-    "TGA": "*",
-    "TGC": "C",
-    "TGG": "W",
-    "TGT": "C",
-    "TTA": "L",
-    "TTC": "F",
-    "TTG": "L",
-    "TTT": "F",
-}
 
 __all__ = [
     "CODON_TO_AMINO_ACID",
@@ -159,26 +101,7 @@ class LocusAlleleInformation:
     alleles_above_mode_threshold_count: int
 
 
-@dataclass(frozen=True)
-class _AlleleSequenceValidation:
-    """Coding-sequence validation flags for one normalized allele."""
-
-    has_incomplete_orf: bool
-    has_ambiguous_bases: bool
-    is_missing_start_or_stop_codon: bool
-    has_in_frame_stop_codon: bool
-
-    @property
-    def is_valid(self) -> bool:
-        """Return whether the allele has no coding-sequence exception."""
-        return not any(
-            (
-                self.has_incomplete_orf,
-                self.has_ambiguous_bases,
-                self.is_missing_start_or_stop_codon,
-                self.has_in_frame_stop_codon,
-            )
-        )
+_AlleleSequenceValidation = AlleleSequenceValidation
 
 
 @dataclass(frozen=True)
@@ -215,146 +138,35 @@ class _CachedSchemeAlleleAnalysis:
     locus_information: tuple[_CachedLocusAlleleInformation, ...]
 
 
-def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted scheme directory."""
-    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
-    if not resolved_scheme_directory_path.exists():
-        raise FileNotFoundError(
-            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
-        )
-    if not resolved_scheme_directory_path.is_dir():
-        raise NotADirectoryError(
-            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
-        )
-    return resolved_scheme_directory_path
-
-
-def _is_fasta_file(candidate_file_path: Path) -> bool:
-    """Return whether a path is a recognized FASTA file."""
-    return candidate_file_path.is_file() and candidate_file_path.name.lower().endswith(
-        FASTA_FILENAME_SUFFIXES
-    )
-
-
-def _find_allele_file_paths(
-    scheme_directory_path: Path,
-) -> tuple[Path, ...]:
-    """Return recognized locus FASTA files in deterministic order."""
-    return tuple(
-        sorted(
-            candidate_file_path
-            for candidate_file_path in scheme_directory_path.rglob("*")
-            if _is_fasta_file(candidate_file_path)
-        )
-    )
-
-
-def _remove_fasta_filename_suffix(relative_file_path: str) -> str:
-    """Remove a recognized FASTA suffix from a scheme-relative path."""
-    lowercase_relative_file_path = relative_file_path.lower()
-    for filename_suffix in sorted(FASTA_FILENAME_SUFFIXES, key=len, reverse=True):
-        if lowercase_relative_file_path.endswith(filename_suffix):
-            return relative_file_path[: -len(filename_suffix)]
-    return relative_file_path
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_is_fasta_file = is_fasta_file
+_find_allele_file_paths = find_locus_fasta_paths
+_remove_fasta_filename_suffix = remove_fasta_filename_suffix
 
 
 def _iterate_fasta_records(
     fasta_lines: Iterable[str],
 ) -> Iterable[tuple[str, str]]:
     """Yield identifier and assembled sequence pairs from FASTA text."""
-    current_identifier: str | None = None
-    current_sequence_parts: list[str] = []
-
-    for fasta_line in fasta_lines:
-        stripped_fasta_line = fasta_line.strip()
-        if stripped_fasta_line.startswith(">"):
-            if current_identifier is not None:
-                yield current_identifier, "".join(current_sequence_parts)
-            current_identifier = stripped_fasta_line[1:].split(maxsplit=1)[0]
-            current_sequence_parts = []
-        elif stripped_fasta_line and current_identifier is not None:
-            current_sequence_parts.append(stripped_fasta_line)
-
-    if current_identifier is not None:
-        yield current_identifier, "".join(current_sequence_parts)
+    return (
+        (record.identifier, record.sequence)
+        for record in iterate_fasta_records(fasta_lines)
+    )
 
 
 def _read_fasta_records(
     allele_file_path: Path,
 ) -> tuple[tuple[str, str], ...]:
     """Read every identifier and sequence from one locus FASTA file."""
-    if allele_file_path.name.lower().endswith(".gz"):
-        with gzip.open(
-            allele_file_path,
-            mode="rt",
-            encoding="utf-8",
-        ) as allele_file:
-            return tuple(_iterate_fasta_records(allele_file))
-
-    with allele_file_path.open(encoding="utf-8") as allele_file:
-        return tuple(_iterate_fasta_records(allele_file))
-
-
-def _contains_in_frame_stop_codon(normalized_allele_sequence: str) -> bool:
-    """Return whether a stop codon occurs before the terminal codon."""
-    final_complete_codon_end_position = len(normalized_allele_sequence) - (
-        len(normalized_allele_sequence) % 3
-    )
-    in_frame_codon_end_position = final_complete_codon_end_position
-    if (
-        len(normalized_allele_sequence) % 3 == 0
-        and normalized_allele_sequence[-3:] in STOP_CODONS
-    ):
-        in_frame_codon_end_position -= 3
-
-    return any(
-        normalized_allele_sequence[
-            codon_start_position : codon_start_position + 3
-        ]
-        in STOP_CODONS
-        for codon_start_position in range(
-            3,
-            in_frame_codon_end_position,
-            3,
-        )
+    return tuple(
+        (record.identifier, record.sequence)
+        for record in read_fasta_records(allele_file_path)
     )
 
 
-def _evaluate_allele_sequence(
-    normalized_allele_sequence: str,
-) -> _AlleleSequenceValidation:
-    """Evaluate the four chewBBACA-style coding-sequence rules."""
-    return _AlleleSequenceValidation(
-        has_incomplete_orf=len(normalized_allele_sequence) % 3 != 0,
-        has_ambiguous_bases=not set(normalized_allele_sequence).issubset(
-            VALID_DNA_BASES
-        ),
-        is_missing_start_or_stop_codon=(
-            normalized_allele_sequence[:3] not in BACTERIAL_START_CODONS
-            or normalized_allele_sequence[-3:] not in STOP_CODONS
-        ),
-        has_in_frame_stop_codon=_contains_in_frame_stop_codon(
-            normalized_allele_sequence
-        ),
-    )
-
-
-def _translate_valid_allele(normalized_allele_sequence: str) -> str:
-    """Translate a valid bacterial CDS, normalizing its start codon to M."""
-    translated_amino_acids = ["M"]
-    translated_amino_acids.extend(
-        CODON_TO_AMINO_ACID[
-            normalized_allele_sequence[
-                codon_start_position : codon_start_position + 3
-            ]
-        ]
-        for codon_start_position in range(
-            3,
-            len(normalized_allele_sequence) - 3,
-            3,
-        )
-    )
-    return "".join(translated_amino_acids)
+_contains_in_frame_stop_codon = contains_in_frame_stop_codon
+_evaluate_allele_sequence = evaluate_allele_sequence
+_translate_valid_allele = translate_valid_allele
 
 
 def _count_length_outliers(allele_lengths: tuple[int, ...]) -> tuple[int, int]:
@@ -445,24 +257,7 @@ def _analyze_locus(
     )
 
 
-def _create_source_signature(
-    scheme_directory_path: Path,
-    allele_file_paths: Iterable[Path],
-) -> tuple[tuple[str, int, int], ...]:
-    """Create a file metadata signature for cache invalidation."""
-    source_signature: list[tuple[str, int, int]] = []
-    for allele_file_path in allele_file_paths:
-        allele_file_status = allele_file_path.stat()
-        source_signature.append(
-            (
-                allele_file_path.relative_to(
-                    scheme_directory_path
-                ).as_posix(),
-                allele_file_status.st_size,
-                allele_file_status.st_mtime_ns,
-            )
-        )
-    return tuple(source_signature)
+_create_source_signature = create_fasta_source_signature
 
 
 def _read_cached_analysis(
@@ -544,24 +339,10 @@ def _write_cached_analysis(
             for locus_information_item in cached_analysis.locus_information
         ],
     }
-    temporary_cache_file_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_ALLELE_INFORMATION_CACHE_FILENAME}.",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cached_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-
-        temporary_cache_file_path.replace(
-            scheme_directory_path / SCHEME_ALLELE_INFORMATION_CACHE_FILENAME
-        )
-    finally:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+    write_json_atomically(
+        scheme_directory_path / SCHEME_ALLELE_INFORMATION_CACHE_FILENAME,
+        cached_data,
+    )
 
 
 def _get_or_create_cached_analysis(

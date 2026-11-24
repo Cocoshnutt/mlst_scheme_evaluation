@@ -12,37 +12,47 @@ thresholds remain outside it and are applied by the consuming modules.
 """
 
 import json
-import tempfile
-from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .allele_info import (
-    _evaluate_allele_sequence,
-    _find_allele_file_paths,
-    _read_fasta_records,
-    _remove_fasta_filename_suffix,
-    _translate_valid_allele,
+from .cache_io import write_json_atomically
+from .fasta import (
+    FastaSourceSignature,
+    create_fasta_source_signature,
+    find_locus_fasta_paths,
+    read_fasta_records,
+    remove_fasta_filename_suffix,
+    resolve_scheme_directory_path,
 )
-from .info import NucleotideBaseComposition, count_nucleotide_base_composition
-from .stats import _calculate_locus_statistics
+from .sequence import (
+    NucleotideBaseComposition,
+    count_nucleotide_base_composition,
+    evaluate_allele_sequence,
+    normalize_nucleotide_sequence,
+    translate_valid_allele,
+)
+from .stats import calculate_locus_statistics_measurements
 
 SCHEME_STATIC_ANALYSIS_CACHE_FILENAME = ".scheme-static-analysis-cache.json"
 SCHEME_STATIC_ANALYSIS_CACHE_FILENAMES = (
     SCHEME_STATIC_ANALYSIS_CACHE_FILENAME,
 )
 SCHEME_STATIC_ANALYSIS_CACHE_VERSION = 1
+SCHEME_STATIC_ANALYSIS_METHOD_IDENTIFIER = (
+    "recursive-locus-fasta-static-analysis-v1"
+)
 
 __all__ = [
     "SCHEME_STATIC_ANALYSIS_CACHE_FILENAME",
     "SCHEME_STATIC_ANALYSIS_CACHE_FILENAMES",
     "SCHEME_STATIC_ANALYSIS_CACHE_VERSION",
+    "SCHEME_STATIC_ANALYSIS_METHOD_IDENTIFIER",
     "SharedLocusStaticAnalysis",
     "SharedSchemeStaticAnalysis",
     "get_shared_scheme_static_analysis",
 ]
 
-type SourceSignature = tuple[tuple[str, int, int], ...]
+type SourceSignature = FastaSourceSignature
 
 
 @dataclass(frozen=True)
@@ -89,35 +99,9 @@ class SharedSchemeStaticAnalysis:
     loci: tuple[SharedLocusStaticAnalysis, ...]
 
 
-def _create_source_signature(
-    scheme_directory_path: Path,
-    allele_file_paths: Iterable[Path],
-) -> SourceSignature:
-    """Return the path, size, and modification time of every locus file."""
-    return tuple(
-        (
-            allele_file_path.relative_to(scheme_directory_path).as_posix(),
-            allele_file_path.stat().st_size,
-            allele_file_path.stat().st_mtime_ns,
-        )
-        for allele_file_path in allele_file_paths
-    )
-
-
-def _resolve_scheme_directory_path(
-    scheme_directory_path: str | Path,
-) -> Path:
-    """Resolve and validate a directory containing scheme FASTA files."""
-    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
-    if not resolved_scheme_directory_path.exists():
-        raise FileNotFoundError(
-            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
-        )
-    if not resolved_scheme_directory_path.is_dir():
-        raise NotADirectoryError(
-            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
-        )
-    return resolved_scheme_directory_path
+_create_source_signature = create_fasta_source_signature
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_read_fasta_records = read_fasta_records
 
 
 def _analyze_locus(
@@ -136,10 +120,10 @@ def _analyze_locus(
     canonical_nucleotide_base_count = 0
     excluded_nucleotide_base_count = 0
 
-    for _fasta_identifier, allele_sequence in _read_fasta_records(
-        allele_file_path
-    ):
-        normalized_allele_sequence = "".join(allele_sequence.split()).upper()
+    for fasta_record in _read_fasta_records(allele_file_path):
+        normalized_allele_sequence = normalize_nucleotide_sequence(
+            fasta_record.sequence
+        )
         allele_lengths.append(len(normalized_allele_sequence))
         nucleotide_base_composition = count_nucleotide_base_composition(
             normalized_allele_sequence
@@ -153,13 +137,13 @@ def _analyze_locus(
         excluded_nucleotide_base_count += (
             nucleotide_base_composition.excluded_nucleotide_base_count
         )
-        allele_sequence_validation = _evaluate_allele_sequence(
+        allele_sequence_validation = evaluate_allele_sequence(
             normalized_allele_sequence
         )
         if allele_sequence_validation.is_valid:
             valid_allele_count += 1
             distinct_protein_alleles.add(
-                _translate_valid_allele(normalized_allele_sequence)
+                translate_valid_allele(normalized_allele_sequence)
             )
         if allele_sequence_validation.has_incomplete_orf:
             incomplete_orf_allele_count += 1
@@ -179,14 +163,14 @@ def _analyze_locus(
     relative_file_path = allele_file_path.relative_to(
         scheme_directory_path
     ).as_posix()
-    locus_statistics = _calculate_locus_statistics(
+    locus_statistics = calculate_locus_statistics_measurements(
         relative_file_path,
         immutable_allele_lengths,
         nucleotide_base_composition,
     )
     return SharedLocusStaticAnalysis(
         relative_file_path=relative_file_path,
-        locus_name=_remove_fasta_filename_suffix(relative_file_path),
+        locus_name=remove_fasta_filename_suffix(relative_file_path),
         allele_lengths=immutable_allele_lengths,
         valid_allele_count=valid_allele_count,
         distinct_protein_allele_count=len(distinct_protein_alleles),
@@ -380,24 +364,10 @@ def _write_cached_analysis(
         "source_signature": analysis.source_signature,
         "loci": [asdict(locus) for locus in analysis.loci],
     }
-    temporary_cache_file_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_STATIC_ANALYSIS_CACHE_FILENAME}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cached_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-        temporary_cache_file_path.replace(
-            scheme_directory_path / SCHEME_STATIC_ANALYSIS_CACHE_FILENAME
-        )
-    finally:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+    write_json_atomically(
+        scheme_directory_path / SCHEME_STATIC_ANALYSIS_CACHE_FILENAME,
+        cached_data,
+    )
 
 
 def get_shared_scheme_static_analysis(
@@ -423,7 +393,7 @@ def get_shared_scheme_static_analysis(
     resolved_scheme_directory_path = _resolve_scheme_directory_path(
         scheme_directory_path
     )
-    allele_file_paths = _find_allele_file_paths(resolved_scheme_directory_path)
+    allele_file_paths = find_locus_fasta_paths(resolved_scheme_directory_path)
     source_signature = _create_source_signature(
         resolved_scheme_directory_path,
         allele_file_paths,

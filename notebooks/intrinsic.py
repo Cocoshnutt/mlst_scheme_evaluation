@@ -18,16 +18,22 @@ def _():
         repository_root_directory_path / ".cache" / "schemes"
     )
 
-    import altair as alt
     import marimo as mo
 
     from scheme import alignment as _alignment
     from scheme import allele_info as _allele_info
+    from scheme import blast as _blast
     from scheme import bsr as _bsr
     from scheme import cache as _cache
+    from scheme import cache_io as _cache_io
+    from scheme import charts as _charts
+    from scheme import export as _export
+    from scheme import fasta as _fasta
     from scheme import info as _info
     from scheme import overview as _overview
     from scheme import resources as _resources
+    from scheme import selection as _selection
+    from scheme import sequence as _sequence
     from scheme import similarity as _similarity
     from scheme import static_analysis as _static_analysis
     from scheme import stats as _stats
@@ -38,11 +44,26 @@ def _():
     _allele_info_source_file = mo.watch.file(
         repository_root_directory_path / "scheme" / "allele_info.py"
     )
+    _blast_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "blast.py"
+    )
     _bsr_source_file = mo.watch.file(
         repository_root_directory_path / "scheme" / "bsr.py"
     )
     _cache_source_file = mo.watch.file(
         repository_root_directory_path / "scheme" / "cache.py"
+    )
+    _cache_io_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "cache_io.py"
+    )
+    _charts_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "charts.py"
+    )
+    _export_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "export.py"
+    )
+    _fasta_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "fasta.py"
     )
     _info_source_file = mo.watch.file(
         repository_root_directory_path / "scheme" / "info.py"
@@ -52,6 +73,12 @@ def _():
     )
     _resources_source_file = mo.watch.file(
         repository_root_directory_path / "scheme" / "resources.py"
+    )
+    _selection_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "selection.py"
+    )
+    _sequence_source_file = mo.watch.file(
+        repository_root_directory_path / "scheme" / "sequence.py"
     )
     _similarity_source_file = mo.watch.file(
         repository_root_directory_path / "scheme" / "similarity.py"
@@ -64,26 +91,41 @@ def _():
     )
     _alignment_source_file.read_bytes()
     _allele_info_source_file.read_bytes()
+    _blast_source_file.read_bytes()
     _bsr_source_file.read_bytes()
     _cache_source_file.read_bytes()
+    _cache_io_source_file.read_bytes()
+    _charts_source_file.read_bytes()
+    _export_source_file.read_bytes()
+    _fasta_source_file.read_bytes()
     _info_source_file.read_bytes()
     _overview_source_file.read_bytes()
     _resources_source_file.read_bytes()
+    _selection_source_file.read_bytes()
+    _sequence_source_file.read_bytes()
     _similarity_source_file.read_bytes()
     _static_analysis_source_file.read_bytes()
     _stats_source_file.read_bytes()
 
     _cache = _importlib.reload(_cache)
+    _cache_io = _importlib.reload(_cache_io)
+    _charts = _importlib.reload(_charts)
+    _fasta = _importlib.reload(_fasta)
+    _sequence = _importlib.reload(_sequence)
+    _selection = _importlib.reload(_selection)
     _info = _importlib.reload(_info)
     _allele_info = _importlib.reload(_allele_info)
     _stats = _importlib.reload(_stats)
     _static_analysis = _importlib.reload(_static_analysis)
     _resources = _importlib.reload(_resources)
     _alignment = _importlib.reload(_alignment)
+    _blast = _importlib.reload(_blast)
     _similarity = _importlib.reload(_similarity)
     _bsr = _importlib.reload(_bsr)
     _overview = _importlib.reload(_overview)
+    _export = _importlib.reload(_export)
 
+    IntrinsicOperationalSettings = _export.IntrinsicOperationalSettings
     calculate_scheme_alignment_summary = (
         _alignment.calculate_scheme_alignment_summary
     )
@@ -96,7 +138,14 @@ def _():
     create_intrinsic_scheme_overview = (
         _overview.create_intrinsic_scheme_overview
     )
-    create_scheme_statistics_charts = _stats.create_scheme_statistics_charts
+    create_intrinsic_evaluation_bundle = (
+        _export.create_intrinsic_evaluation_bundle
+    )
+    intrinsic_evaluation_bundle_filename = (
+        _export.intrinsic_evaluation_bundle_filename
+    )
+    create_scheme_statistics_charts = _charts.create_scheme_statistics_charts
+    create_similarity_scatter_chart = _charts.create_similarity_scatter_chart
     default_amino_acid_gap_warning_threshold_percentage = (
         _alignment.DEFAULT_AMINO_ACID_GAP_WARNING_THRESHOLD_PERCENTAGE
     )
@@ -161,7 +210,7 @@ def _():
 
     return (
         CandidateParalogThresholds,
-        alt,
+        IntrinsicOperationalSettings,
         alignment_strategy_labels,
         analysis_cache_filename_groups,
         available_cpu_count,
@@ -171,8 +220,10 @@ def _():
         classify_representative_bsr_analysis,
         clear_cache,
         count_alleles_below_minimum_length,
+        create_intrinsic_evaluation_bundle,
         create_intrinsic_scheme_overview,
         create_scheme_statistics_charts,
+        create_similarity_scatter_chart,
         default_candidate_paralog_amino_acid_identity_threshold_percentage,
         default_amino_acid_gap_warning_threshold_percentage,
         default_alignment_strategy,
@@ -188,6 +239,7 @@ def _():
         get_scheme_representative_bsr_analysis,
         get_scheme_similarity_analysis,
         get_scheme_statistics,
+        intrinsic_evaluation_bundle_filename,
         mafft_progress_output_stream,
         mo,
         representative_bsr_progress_output_stream,
@@ -647,6 +699,126 @@ def _(intrinsic_scheme_overview, mo):
         )
 
     mo.vstack(_overview_sections, gap=2)
+
+
+@app.cell(hide_code=True)
+def _(
+    IntrinsicOperationalSettings,
+    alignment_strategy_input,
+    amino_acid_gap_warning_threshold_percentage,
+    available_cpu_count,
+    candidate_paralog_analysis,
+    candidate_paralog_thresholds,
+    create_intrinsic_evaluation_bundle,
+    default_alignment_strategy,
+    intrinsic_evaluation_bundle_filename,
+    intrinsic_scheme_overview,
+    locus_statistics,
+    maximum_worker_count,
+    mo,
+    repository_root_directory_path,
+    representative_bsr_classification,
+    representative_bsr_threshold_input,
+    scheme,
+    scheme_alignment_analysis,
+    scheme_alignment_summary,
+    scheme_allele_information,
+    scheme_representative_bsr_analysis,
+    scheme_similarity_analysis,
+):
+    _archive_file_path = scheme.value
+    _operational_settings = IntrinsicOperationalSettings(
+        detected_available_cpu_count=available_cpu_count,
+        submitted_worker_budget=maximum_worker_count,
+        selected_mafft_strategy=(
+            alignment_strategy_input.value or default_alignment_strategy
+        ),
+        amino_acid_gap_warning_threshold_percentage=(
+            amino_acid_gap_warning_threshold_percentage
+        ),
+        candidate_paralog_thresholds=candidate_paralog_thresholds,
+        representative_bsr_threshold=float(
+            representative_bsr_threshold_input.value
+        ),
+    )
+    _completed_expensive_stage_count = sum(
+        analysis is not None
+        for analysis in (
+            scheme_alignment_analysis,
+            scheme_similarity_analysis,
+            scheme_representative_bsr_analysis,
+        )
+    )
+    _bundle_scope = (
+        "complete intrinsic evaluation"
+        if _completed_expensive_stage_count == 3
+        else (
+            "static results only"
+            if _completed_expensive_stage_count == 0
+            else (
+                f"static results plus {_completed_expensive_stage_count} of 3 "
+                "requested expensive stages"
+            )
+        )
+    )
+
+    def _build_intrinsic_evaluation_bundle():
+        return create_intrinsic_evaluation_bundle(
+            repository_root_directory_path=repository_root_directory_path,
+            archive_file_path=_archive_file_path,
+            scheme_source_inventory_file_path=(
+                repository_root_directory_path
+                / "metadata"
+                / "scheme_sources.toml"
+            ),
+            operational_settings=_operational_settings,
+            locus_statistics=tuple(locus_statistics),
+            scheme_allele_information=tuple(scheme_allele_information),
+            intrinsic_scheme_overview=intrinsic_scheme_overview,
+            scheme_alignment_analysis=scheme_alignment_analysis,
+            scheme_alignment_summary=scheme_alignment_summary,
+            scheme_similarity_analysis=scheme_similarity_analysis,
+            candidate_paralog_analysis=candidate_paralog_analysis,
+            scheme_representative_bsr_analysis=(
+                scheme_representative_bsr_analysis
+            ),
+            representative_bsr_classification=(
+                representative_bsr_classification
+            ),
+        )
+
+    _bundle_download = mo.download(
+        data=_build_intrinsic_evaluation_bundle,
+        filename=intrinsic_evaluation_bundle_filename(_archive_file_path),
+        mimetype="application/zip",
+        label="Download current evaluation bundle",
+    )
+    mo.vstack(
+        [
+            mo.md(
+                f"""
+                ### Reproducible result bundle
+
+                The current download contains **{_bundle_scope}** as open JSON
+                and TSV files, plus input, method, and submitted operational
+                provenance and SHA-256 checksums. This includes the current
+                worker budget, MAFFT strategy, thresholds, and cache-reuse
+                status. Internal cache files are not included. Creating the
+                control does not request MAFFT or BLAST; the archive checksum
+                and ZIP are produced only when you click download.
+                """
+            ),
+            mo.callout(
+                "Source metadata marked TODO in metadata/scheme_sources.toml "
+                "is preserved and identified as incomplete rather than "
+                "guessed. Complete those records before publishing an "
+                "evaluation bundle.",
+                kind="warn",
+            ),
+            _bundle_download,
+        ],
+        gap=1,
+    )
 
 
 @app.cell(hide_code=True)
@@ -1742,7 +1914,7 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(alt, mo, scheme_similarity_analysis):
+def _(create_similarity_scatter_chart, mo, scheme_similarity_analysis):
     mo.stop(scheme_similarity_analysis is None)
     similarity_information_rows = [
         {
@@ -1777,77 +1949,12 @@ def _(alt, mo, scheme_similarity_analysis):
         }
         for similarity_match in scheme_similarity_analysis.matches
     ]
-    _maximum_similarity_plot_point_count = 20_000
-    _all_similarity_plot_rows = [
-        {
-            "Sequence Level": (
-                "Nucleotide"
-                if similarity_match.sequence_level == "nucleotide"
-                else "Amino acid"
-            ),
-            "Query Locus": similarity_match.query_locus_name,
-            "Subject Locus": similarity_match.subject_locus_name,
-            "Identity (%)": round(similarity_match.identity_percentage, 3),
-            "Minimum Coverage (%)": round(
-                similarity_match.minimum_coverage_percentage,
-                3,
-            ),
-            "Directional BSR": round(
-                similarity_match.blast_score_ratio,
-                6,
-            ),
-        }
-        for similarity_match in scheme_similarity_analysis.matches
-    ]
-    if len(_all_similarity_plot_rows) > _maximum_similarity_plot_point_count:
-        _plot_sampling_interval = (
-            len(_all_similarity_plot_rows) / _maximum_similarity_plot_point_count
-        )
-        similarity_plot_rows = [
-            _all_similarity_plot_rows[
-                int(_plot_index * _plot_sampling_interval)
-            ]
-            for _plot_index in range(_maximum_similarity_plot_point_count)
-        ]
-    else:
-        similarity_plot_rows = _all_similarity_plot_rows
-    similarity_scatter_chart = alt.Chart(
-        alt.Data(values=similarity_plot_rows)
-    ).mark_circle(opacity=0.65, size=65).encode(
-        x=alt.X(
-            "Identity (%):Q",
-            title="Identity (%)",
-            scale=alt.Scale(domain=[0, 100]),
-        ),
-        y=alt.Y(
-            "Minimum Coverage (%):Q",
-            title="Minimum query/subject coverage (%)",
-            scale=alt.Scale(domain=[0, 100]),
-        ),
-        color=alt.Color(
-            "Sequence Level:N",
-            title="Sequence level",
-            scale=alt.Scale(
-                domain=["Nucleotide", "Amino acid"],
-                range=["#3b82f6", "#f97316"],
-            ),
-        ),
-        tooltip=[
-            alt.Tooltip("Sequence Level:N"),
-            alt.Tooltip("Query Locus:N"),
-            alt.Tooltip("Subject Locus:N"),
-            alt.Tooltip("Identity (%):Q", format=".3f"),
-            alt.Tooltip("Minimum Coverage (%):Q", format=".3f"),
-            alt.Tooltip("Directional BSR:Q", format=".6f"),
-        ],
-    ).properties(
-        title="Identity and coverage of BLAST-reported cross-locus hits",
-        width=1100,
-        height=420,
+    similarity_scatter_chart_result = create_similarity_scatter_chart(
+        scheme_similarity_analysis
     )
-    if similarity_plot_rows:
+    if similarity_scatter_chart_result.chart is not None:
         similarity_chart = mo.ui.altair_chart(
-            similarity_scatter_chart,
+            similarity_scatter_chart_result.chart,
             chart_selection=False,
             legend_selection=False,
         )
@@ -1954,8 +2061,8 @@ def _(alt, mo, scheme_similarity_analysis):
                 **{scheme_similarity_analysis.reused_from_cache}**.
 
                 The scatter plot displays
-                **{len(similarity_plot_rows):,}** of
-                **{len(similarity_information_rows):,}** result rows. When more
+                **{similarity_scatter_chart_result.displayed_point_count:,}** of
+                **{similarity_scatter_chart_result.total_point_count:,}** result rows. When more
                 than 20,000 hits are present, the plot uses a deterministic
                 evenly spaced sample for browser performance; the searchable
                 and downloadable table remains complete.

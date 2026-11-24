@@ -24,10 +24,17 @@ validation of newly developed schemes.
 
 - Archive extraction and versioned caching for the included MLST and cgMLST
   scheme collection.
+- Shared, tested FASTA parsing, CDS validation and translation, and
+  deterministic representative-selection primitives across intrinsic analyses.
 - Scheme-wide and per-locus allele counts, length distributions, modal-length
   outliers and coding-sequence integrity checks.
 - A progressive scheme-wide overview, interactive summary statistics, charts,
   and a searchable per-locus table in the Marimo application.
+- A lazy, versioned intrinsic-evaluation download bundle with open JSON/TSV
+  results, explicit partial-stage status, input, tool, submitted operational,
+  and cache-reuse provenance, and SHA-256 checksums.
+- Centralized, tested Altair chart projections with bounded embedded datasets,
+  separate from scientific measurement and classification modules.
 - Cached nucleotide and protein MAFFT analyses for alignment-gap statistics and
   nucleotide polymorphic-site measurements.
 - Cached inter-locus BLAST analyses reporting nucleotide and protein identity,
@@ -107,6 +114,8 @@ performance metrics. Complete a dataset-specific copy of
 see [`docs/functional-workflow.md`](docs/functional-workflow.md). Developer
 steps for extending either phase are in
 [`docs/adding-an-analysis.md`](docs/adding-an-analysis.md).
+The repository-level component boundaries and both notebook data flows are in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 After selecting a scheme, static summary, locus-statistics, and allele-table
 results load automatically. MAFFT and BLAST analyses run only when requested
@@ -115,6 +124,15 @@ control requests all currently implemented expensive intrinsic analyses, and
 compatible cached results are reused. The overview at the beginning updates
 progressively as requested stages finish; pending overview sections do not
 trigger computation.
+
+The overview also offers **Download current evaluation bundle**. It exports
+only results already available in the notebook and never starts an expensive
+analysis. A static-only download is valid and explicitly marked as partial;
+run the complete intrinsic evaluation first when MAFFT and BLAST outputs are
+required. Internal cache files are not research outputs and are never included.
+See [`docs/fair-outputs.md`](docs/fair-outputs.md) for the file contract, FAIR
+principles, missing-value conventions, and the pre-publication provenance
+checklist.
 
 The expensive-analysis panel also provides one shared worker budget for MAFFT,
 BLASTn, and BLASTp. Its default is 80% of the logical CPUs available to the
@@ -236,6 +254,10 @@ Analysis cache filenames now use the official `scheme` terminology. Existing
 `.schema-*-cache.json` files remain readable, while newly calculated results
 are written as `.scheme-*-cache.json` files.
 
+All JSON analysis caches use one same-directory temporary-file and atomic
+replacement operation. Cache schemas, versions, compatibility checks, and
+scientific validation remain owned by their respective analysis modules.
+
 The scheme information module can also be used from the command line:
 
 ```console
@@ -270,7 +292,8 @@ uv run --locked python -m scheme.bsr --help
 uv run --locked python -m scheme.similarity --help
 ```
 
-`scheme.stats` remains a library-only chart and statistics module.
+`scheme.stats` remains a library-only scientific statistics module; reusable
+Altair specifications are provided separately by `scheme.charts`.
 
 ## TODO: scheme evaluation roadmap
 
@@ -388,6 +411,8 @@ Implemented foundation:
 
 ### Documentation and deliverables
 
+- [x] Export current intrinsic results as a versioned open bundle with explicit
+  stage status, provenance, and checksums.
 - [ ] Produce a versioned, standardized evaluation checklist that records each
   criterion, its required inputs, calculation, literature basis, and intended
   interpretation.
@@ -396,6 +421,13 @@ Implemented foundation:
 - [ ] Document the evaluation methodologies and findings in the final report.
 - [ ] Prepare a draft validation report covering cross-organism and
   typing-pipeline validation.
+
+## Citation
+
+Please cite the software using the machine-readable metadata in
+[`CITATION.cff`](CITATION.cff). Release-specific dates and persistent
+identifiers should be added when a corresponding archived release is
+published.
 
 ## License
 

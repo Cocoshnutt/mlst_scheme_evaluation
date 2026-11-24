@@ -39,11 +39,9 @@ only to cached proportions, so changing it never reruns MAFFT.
 """
 
 import argparse
-import gzip
 import json
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -51,12 +49,23 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TextIO
 
-from .allele_info import (
-    _evaluate_allele_sequence,
-    _translate_valid_allele,
+from .cache_io import write_json_atomically
+from .fasta import (
+    create_fasta_source_signature,
+    find_locus_fasta_paths,
+    is_fasta_file,
+    iterate_fasta_records,
+    read_fasta_records,
+    remove_fasta_filename_suffix,
+    resolve_scheme_directory_path,
 )
-from .info import FASTA_FILENAME_SUFFIXES
 from .resources import resolve_worker_count
+from .sequence import (
+    IUPAC_DNA_BASES,
+    evaluate_allele_sequence,
+    normalize_nucleotide_sequence,
+    translate_valid_allele,
+)
 
 SCHEME_ALIGNMENT_CACHE_FILENAME = ".scheme-alignment-cache.json"
 LEGACY_ALIGNMENT_CACHE_FILENAME = ".schema-alignment-cache.json"
@@ -68,7 +77,6 @@ SCHEME_ALIGNMENT_CACHE_VERSION = 4
 SCHEME_ALIGNMENT_CACHE_CHECKPOINT_LOCUS_INTERVAL = 10
 SCHEME_ALIGNMENT_CACHE_CHECKPOINT_SECONDS = 5.0
 DEFAULT_AMINO_ACID_GAP_WARNING_THRESHOLD_PERCENTAGE = 5.0
-IUPAC_DNA_BASES = frozenset("ACGTRYSWKMBDHVN")
 ALIGNMENT_STRATEGY_FFT_NS_2 = "fft-ns-2"
 ALIGNMENT_STRATEGY_FFT_NS_1 = "fft-ns-1"
 ALIGNMENT_STRATEGY_AUTO = "auto"
@@ -185,6 +193,12 @@ class SchemeAlignmentAnalysis:
     alignment_method_identifier: str
     locus_statistics: tuple[LocusAlignmentStatistics, ...]
     alignment_strategy: str = DEFAULT_ALIGNMENT_STRATEGY
+    reused_locus_count: int = 0
+
+    @property
+    def calculated_locus_count(self) -> int:
+        """Return loci calculated during this request rather than reused."""
+        return len(self.locus_statistics) - self.reused_locus_count
 
 
 @dataclass(frozen=True)
@@ -383,95 +397,27 @@ def _format_duration(duration_seconds: float) -> str:
     return f"{seconds:d}s"
 
 
-def _resolve_scheme_directory_path(scheme_directory_path: str | Path) -> Path:
-    """Resolve and validate an extracted scheme directory."""
-    resolved_scheme_directory_path = Path(scheme_directory_path).resolve()
-    if not resolved_scheme_directory_path.exists():
-        raise FileNotFoundError(
-            f"Scheme directory does not exist: {resolved_scheme_directory_path}"
-        )
-    if not resolved_scheme_directory_path.is_dir():
-        raise NotADirectoryError(
-            f"Scheme path is not a directory: {resolved_scheme_directory_path}"
-        )
-    return resolved_scheme_directory_path
-
-
-def _is_fasta_file(candidate_file_path: Path) -> bool:
-    """Return whether a path is a recognized FASTA file."""
-    return candidate_file_path.is_file() and candidate_file_path.name.lower().endswith(
-        FASTA_FILENAME_SUFFIXES
-    )
-
-
-def _find_allele_file_paths(
-    scheme_directory_path: Path,
-) -> tuple[Path, ...]:
-    """Return recognized locus FASTA files in deterministic order."""
-    return tuple(
-        sorted(
-            candidate_file_path
-            for candidate_file_path in scheme_directory_path.rglob("*")
-            if _is_fasta_file(candidate_file_path)
-        )
-    )
-
-
-def _remove_fasta_filename_suffix(relative_file_path: str) -> str:
-    """Remove a recognized FASTA suffix from a scheme-relative path."""
-    lowercase_relative_file_path = relative_file_path.lower()
-    for filename_suffix in sorted(FASTA_FILENAME_SUFFIXES, key=len, reverse=True):
-        if lowercase_relative_file_path.endswith(filename_suffix):
-            return relative_file_path[: -len(filename_suffix)]
-    return relative_file_path
+_resolve_scheme_directory_path = resolve_scheme_directory_path
+_is_fasta_file = is_fasta_file
+_find_allele_file_paths = find_locus_fasta_paths
+_remove_fasta_filename_suffix = remove_fasta_filename_suffix
+_evaluate_allele_sequence = evaluate_allele_sequence
+_translate_valid_allele = translate_valid_allele
 
 
 def _iterate_fasta_sequences(fasta_lines: Iterable[str]) -> Iterable[str]:
     """Yield assembled sequences, including empty header-defined records."""
-    current_sequence_parts: list[str] | None = None
-    for fasta_line in fasta_lines:
-        stripped_fasta_line = fasta_line.strip()
-        if stripped_fasta_line.startswith(">"):
-            if current_sequence_parts is not None:
-                yield "".join(current_sequence_parts)
-            current_sequence_parts = []
-        elif stripped_fasta_line and current_sequence_parts is not None:
-            current_sequence_parts.append(stripped_fasta_line)
-
-    if current_sequence_parts is not None:
-        yield "".join(current_sequence_parts)
+    return (record.sequence for record in iterate_fasta_records(fasta_lines))
 
 
 def _read_fasta_sequences(allele_file_path: Path) -> tuple[str, ...]:
     """Read all assembled allele sequences from one locus FASTA file."""
-    if allele_file_path.name.lower().endswith(".gz"):
-        with gzip.open(
-            allele_file_path,
-            mode="rt",
-            encoding="utf-8",
-        ) as allele_file:
-            return tuple(_iterate_fasta_sequences(allele_file))
-
-    with allele_file_path.open(encoding="utf-8") as allele_file:
-        return tuple(_iterate_fasta_sequences(allele_file))
+    return tuple(
+        record.sequence for record in read_fasta_records(allele_file_path)
+    )
 
 
-def _create_source_signature(
-    scheme_directory_path: Path,
-    allele_file_paths: Iterable[Path],
-) -> tuple[tuple[str, int, int], ...]:
-    """Create the FASTA metadata signature used for cache invalidation."""
-    source_signature: list[tuple[str, int, int]] = []
-    for allele_file_path in allele_file_paths:
-        allele_file_status = allele_file_path.stat()
-        source_signature.append(
-            (
-                allele_file_path.relative_to(scheme_directory_path).as_posix(),
-                allele_file_status.st_size,
-                allele_file_status.st_mtime_ns,
-            )
-        )
-    return tuple(source_signature)
+_create_source_signature = create_fasta_source_signature
 
 
 def _get_mafft_version(mafft_executable: str) -> str:
@@ -741,7 +687,8 @@ def _analyze_locus(
     """Align required sequence types, reusing compatible partial results."""
     allele_sequences = _read_fasta_sequences(allele_file_path)
     normalized_allele_sequences = tuple(
-        "".join(allele_sequence.split()).upper() for allele_sequence in allele_sequences
+        normalize_nucleotide_sequence(allele_sequence)
+        for allele_sequence in allele_sequences
     )
     nucleotide_sequences = tuple(
         normalized_allele_sequence
@@ -1048,24 +995,10 @@ def _write_cached_alignment_cache(
             for alignment_method_identifier in sorted(method_caches)
         },
     }
-    temporary_cache_file_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=scheme_directory_path,
-            prefix=f"{SCHEME_ALIGNMENT_CACHE_FILENAME}.",
-            delete=False,
-        ) as temporary_cache_file:
-            json.dump(cached_data, temporary_cache_file, separators=(",", ":"))
-            temporary_cache_file_path = Path(temporary_cache_file.name)
-
-        temporary_cache_file_path.replace(
-            scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME
-        )
-    finally:
-        if temporary_cache_file_path is not None:
-            temporary_cache_file_path.unlink(missing_ok=True)
+    write_json_atomically(
+        scheme_directory_path / SCHEME_ALIGNMENT_CACHE_FILENAME,
+        cached_data,
+    )
 
 
 def _try_write_cached_alignment_cache(
@@ -1284,6 +1217,7 @@ def get_scheme_alignment_analysis(
                 reusable_locus_entries[relative_path].locus_statistics
                 for relative_path in source_signature_by_relative_path
             ),
+            reused_locus_count=total_locus_count,
         )
 
     resolved_maximum_parallel_loci = _resolve_maximum_parallel_loci(
@@ -1416,6 +1350,7 @@ def get_scheme_alignment_analysis(
             current_locus_entries[relative_path].locus_statistics
             for relative_path in source_signature_by_relative_path
         ),
+        reused_locus_count=cached_locus_count,
     )
     return alignment_analysis
 
